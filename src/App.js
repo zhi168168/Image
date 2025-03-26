@@ -21,10 +21,32 @@ function App() {
     fileName: ''
   });
 
+  // 添加图片格式选择的 state
+  const [imageFormat, setImageFormat] = useState('jpeg');
+  
+  // 添加内页使用规则模式选择
+  const [pageMode, setPageMode] = useState('flexible'); // flexible宽松模式, strict严谨模式
+
+  // 在state中添加标题配置
+  const [titleConfig, setTitleConfig] = useState({
+    text: '100份外企干货',
+    backgroundColor: '#1890ff'
+  });
+
+  const [resetDownloadStatus, setResetDownloadStatus] = useState(false);
+
   // 在组件加载时检查是否有保存的Excel文件和文件名
   useEffect(() => {
+    // 加载保存的Excel文件
     const savedExcel = localStorage.getItem('savedExcel');
     const savedExcelName = localStorage.getItem('savedExcelName');
+    
+    // 加载保存的标题配置
+    const savedTitleConfig = localStorage.getItem('titleConfig');
+    if (savedTitleConfig) {
+      setTitleConfig(JSON.parse(savedTitleConfig));
+    }
+    
     if (savedExcel && savedExcelName) {
       try {
         const excelFile = new File(
@@ -79,10 +101,6 @@ function App() {
   };
 
   const validateFiles = () => {
-    if (!files.covers.length) {
-      setValidationMessage('请上传封面图片');
-      return false;
-    }
     if (!files.backgrounds.length) {
       setValidationMessage('请上传背景素材图片');
       return false;
@@ -91,11 +109,8 @@ function App() {
       setValidationMessage('请上传表格文件');
       return false;
     }
-    if (files.covers.length !== files.backgrounds.length) {
-      setValidationMessage('背景素材图片的数量和封面图片的数量必须保持一致');
-      return false;
-    }
-    if (!files.covers.every(file => file.type.startsWith('image/'))) {
+    
+    if (files.covers.length && !files.covers.every(file => file.type.startsWith('image/'))) {
       setValidationMessage('所有封面图片必须是图片格式');
       return false;
     }
@@ -115,15 +130,20 @@ function App() {
     
     try {
       setIsProcessing(true);
+      setResetDownloadStatus(true);
       setProcessingStatus({
         status: '准备开始处理...',
         progress: 0,
         zipUrl: null,
         fileName: ''
       });
+      // 清除之前的验证消息
+      setValidationMessage('');
+
+      const coversToUse = files.covers.length > 0 ? files.covers : null;
 
       const result = await ImageProcessor.processImages(
-        files.covers,
+        coversToUse,
         files.backgrounds,
         files.excel,
         (progress, status) => {
@@ -132,7 +152,10 @@ function App() {
             status: status || prev.status,
             progress: Math.round(progress)
           }));
-        }
+        },
+        titleConfig,
+        imageFormat,
+        pageMode // 添加模式参数
       );
 
       // 创建下载链接
@@ -145,14 +168,19 @@ function App() {
         fileName: result.fileName
       }));
       setIsProcessing(false);
+      setResetDownloadStatus(false);
 
     } catch (error) {
+      console.error('处理失败:', error);
+      // 捕获错误并显示在界面上
+      setValidationMessage(error.message);
       setProcessingStatus(prev => ({
         ...prev,
         status: `处理失败: ${error.message}`,
         progress: 0
       }));
       setIsProcessing(false);
+      setResetDownloadStatus(false);
     }
   };
 
@@ -173,10 +201,17 @@ function App() {
     });
   };
 
+  // 修改标题配置的处理函数
+  const handleTitleConfigChange = (newConfig) => {
+    setTitleConfig(newConfig);
+    // 保存到localStorage
+    localStorage.setItem('titleConfig', JSON.stringify(newConfig));
+  };
+
   return (
     <div className="app">
       <header className="app-header">
-        <h1>图文处理工具</h1>
+        <h1>图文处理工具PRO版</h1>
       </header>
       
       <main className="app-main">
@@ -201,6 +236,99 @@ function App() {
           />
         </div>
 
+        <div className="title-config">
+          <h3>内页标题设置</h3>
+          <div className="title-inputs">
+            <div className="input-group">
+              <label>标题文本:</label>
+              <input
+                type="text"
+                value={titleConfig.text}
+                onChange={(e) => handleTitleConfigChange({
+                  ...titleConfig,
+                  text: e.target.value
+                })}
+                placeholder="请输入标题文本"
+              />
+            </div>
+            <div className="input-group">
+              <label>背景颜色:</label>
+              <input
+                type="color"
+                value={titleConfig.backgroundColor}
+                onChange={(e) => handleTitleConfigChange({
+                  ...titleConfig,
+                  backgroundColor: e.target.value
+                })}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* 添加图片格式选择 */}
+        <div className="format-config">
+          <h3>导出图片格式</h3>
+          <div className="format-inputs">
+            <div className="input-group">
+              <label>
+                <input
+                  type="radio"
+                  value="png"
+                  checked={imageFormat === 'png'}
+                  onChange={(e) => setImageFormat(e.target.value)}
+                />
+                PNG格式
+              </label>
+              <label style={{ marginLeft: '20px' }}>
+                <input
+                  type="radio"
+                  value="jpeg"
+                  checked={imageFormat === 'jpeg'}
+                  onChange={(e) => setImageFormat(e.target.value)}
+                />
+                JPG格式
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* 添加内页使用规则选择 */}
+        <div className="mode-config">
+          <h3>内页使用规则</h3>
+          <div className="mode-inputs">
+            <div className="input-group">
+              <label>
+                <input
+                  type="radio"
+                  value="strict"
+                  checked={pageMode === 'strict'}
+                  onChange={(e) => setPageMode(e.target.value)}
+                />
+                严谨模式
+              </label>
+              <label style={{ marginLeft: '20px' }}>
+                <input
+                  type="radio"
+                  value="flexible"
+                  checked={pageMode === 'flexible'}
+                  onChange={(e) => setPageMode(e.target.value)}
+                />
+                宽松模式（默认）
+              </label>
+            </div>
+            {pageMode === 'strict' && (
+              <div className="mode-description">
+                严谨模式：一张内页素材只会用于一张生成的内页图片
+              </div>
+            )}
+            {pageMode === 'flexible' && (
+              <div className="mode-description">
+                宽松模式：一张内页素材会被同一文件夹内的所有内页使用
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="control-panel">
           <ProcessingControl
             onStartProcessing={handleStartProcessing}
@@ -217,6 +345,7 @@ function App() {
               progress={processingStatus.progress}
               zipUrl={processingStatus.zipUrl}
               fileName={processingStatus.fileName}
+              resetDownloadStatus={resetDownloadStatus}
             />
           )}
         </div>

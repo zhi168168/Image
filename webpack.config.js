@@ -6,6 +6,7 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'bundle.js',
+    publicPath: ''
   },
   module: {
     rules: [
@@ -23,13 +24,15 @@ module.exports = {
   plugins: [
     new HtmlWebpackPlugin({
       template: './public/index.html',
+      inject: true,
+      publicPath: './'
     }),
   ],
   devServer: {
-    static: {
-      directory: path.join(__dirname, 'public'),
-    },
-    port: 3000,
+    static: './dist',
     hot: true,
+    open: true,
+    port: 3120,
+    historyApiFallback: true
   },
 }; 

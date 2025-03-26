@@ -1,7 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
-const ProcessingStatus = ({ status, progress, zipUrl, fileName }) => {
+const ProcessingStatus = ({ status, progress, zipUrl, fileName, resetDownloadStatus }) => {
   const [downloadSuccess, setDownloadSuccess] = useState(false);
+
+  useEffect(() => {
+    if (resetDownloadStatus) {
+      setDownloadSuccess(false);
+    }
+  }, [resetDownloadStatus]);
 
   const handleDownload = () => {
     if (zipUrl) {
