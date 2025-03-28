@@ -25,7 +25,15 @@ function App() {
   const [imageFormat, setImageFormat] = useState('jpeg');
   
   // 添加内页使用规则模式选择
-  const [pageMode, setPageMode] = useState('flexible'); // flexible宽松模式, strict严谨模式
+  const [pageMode, setPageMode] = useState('flexible'); // flexible宽松模式, strict严谨模式, cautious谨慎模式
+  
+  // 添加内页数量限制
+  const [pageLimit, setPageLimit] = useState(0); // 0表示不限制
+  
+  // 添加知识拼接模式
+  const [knowledgeMode, setKnowledgeMode] = useState(false); // 默认不启用知识拼接模式
+  const [knowledgeCount, setKnowledgeCount] = useState(0); // 每份文件需要的知识图片数量，0表示不需要
+  const [knowledgeExcel, setKnowledgeExcel] = useState(null); // 知识Excel文件
 
   // 在state中添加标题配置
   const [titleConfig, setTitleConfig] = useState({
@@ -122,6 +130,22 @@ function App() {
       setValidationMessage('表格文件格式不正确');
       return false;
     }
+    
+    // 检查知识拼接模式相关设置
+    if (knowledgeMode) {
+      if (!knowledgeExcel) {
+        setValidationMessage('请上传知识Excel文件');
+        return false;
+      }
+      if (!['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv'].includes(knowledgeExcel.type)) {
+        setValidationMessage('知识Excel文件格式不正确');
+        return false;
+      }
+      if (knowledgeCount > 0) {
+        // 在实际处理中会检查知识条目是否足够，此处只验证基本格式
+      }
+    }
+    
     return true;
   };
 
@@ -155,7 +179,11 @@ function App() {
         },
         titleConfig,
         imageFormat,
-        pageMode // 添加模式参数
+        pageMode, // 添加模式参数
+        pageLimit, // 添加数量限制参数
+        knowledgeMode,
+        knowledgeCount,
+        knowledgeExcel
       );
 
       // 创建下载链接
@@ -267,66 +295,148 @@ function App() {
 
         {/* 添加图片格式选择 */}
         <div className="format-config">
-          <h3>导出图片格式</h3>
+          <h3>输出设置</h3>
           <div className="format-inputs">
-            <div className="input-group">
+            <div className="format-section">
+              <h4>图片格式</h4>
               <label>
                 <input
                   type="radio"
-                  value="png"
-                  checked={imageFormat === 'png'}
-                  onChange={(e) => setImageFormat(e.target.value)}
-                />
-                PNG格式
-              </label>
-              <label style={{ marginLeft: '20px' }}>
-                <input
-                  type="radio"
+                  name="imageFormat"
                   value="jpeg"
                   checked={imageFormat === 'jpeg'}
-                  onChange={(e) => setImageFormat(e.target.value)}
+                  onChange={() => setImageFormat('jpeg')}
                 />
                 JPG格式
               </label>
+              <label>
+                <input
+                  type="radio"
+                  name="imageFormat"
+                  value="png"
+                  checked={imageFormat === 'png'}
+                  onChange={() => setImageFormat('png')}
+                />
+                PNG格式
+              </label>
+            </div>
+
+            <div className="format-section">
+              <h4>内页模式</h4>
+              <label>
+                <input
+                  type="radio"
+                  name="pageMode"
+                  value="flexible"
+                  checked={pageMode === 'flexible'}
+                  onChange={() => setPageMode('flexible')}
+                />
+                宽松模式
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="pageMode"
+                  value="strict"
+                  checked={pageMode === 'strict'}
+                  onChange={() => setPageMode('strict')}
+                />
+                严谨模式
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="pageMode"
+                  value="cautious"
+                  checked={pageMode === 'cautious'}
+                  onChange={() => setPageMode('cautious')}
+                />
+                谨慎模式
+              </label>
+              <div className="mode-description">
+                {pageMode === 'flexible' && '宽松模式：背景图可重复使用，不受素材数量限制'}
+                {pageMode === 'strict' && '严谨模式：每个背景图只使用一次，需要足够的素材'}
+                {pageMode === 'cautious' && '谨慎模式：基于严谨模式，但只有第一页显示标题'}
+              </div>
+            </div>
+
+            <div className="page-limit-section">
+              <h4>内页数量限制</h4>
+              <div className="input-group">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={pageLimit}
+                  onChange={(e) => {
+                    // 确保输入值在 0-100 之间
+                    const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                    setPageLimit(value);
+                  }}
+                  className="page-limit-input"
+                />
+                <span className="page-limit-description">
+                  {pageLimit === 0 
+                    ? '默认值0：不限制内页数量' 
+                    : `限制为 ${pageLimit} 页，超出时会保留首尾页`}
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* 添加内页使用规则选择 */}
-        <div className="mode-config">
-          <h3>内页使用规则</h3>
-          <div className="mode-inputs">
-            <div className="input-group">
-              <label>
-                <input
-                  type="radio"
-                  value="strict"
-                  checked={pageMode === 'strict'}
-                  onChange={(e) => setPageMode(e.target.value)}
-                />
-                严谨模式
-              </label>
-              <label style={{ marginLeft: '20px' }}>
-                <input
-                  type="radio"
-                  value="flexible"
-                  checked={pageMode === 'flexible'}
-                  onChange={(e) => setPageMode(e.target.value)}
-                />
-                宽松模式（默认）
-              </label>
-            </div>
-            {pageMode === 'strict' && (
-              <div className="mode-description">
-                严谨模式：一张内页素材只会用于一张生成的内页图片
-              </div>
-            )}
-            {pageMode === 'flexible' && (
-              <div className="mode-description">
-                宽松模式：一张内页素材会被同一文件夹内的所有内页使用
-              </div>
-            )}
+        <div className="knowledge-config">
+          <h4>知识拼接模式</h4>
+          <label className="knowledge-toggle">
+            <input
+              type="checkbox"
+              checked={knowledgeMode}
+              onChange={(e) => setKnowledgeMode(e.target.checked)}
+            />
+            启用知识拼接模式
+          </label>
+          <div className="mode-description">
+            知识拼接模式：根据Excel表格生成精美的知识图片，标题和内容一一对应
           </div>
+
+          {knowledgeMode && (
+            <div className="knowledge-section">
+              <div className="knowledge-file-uploader">
+                <FileUploader 
+                  type="knowledge" 
+                  onFilesSelected={(type, files) => {
+                    if (files && files.length > 0) {
+                      setKnowledgeExcel(files[0]);
+                    }
+                  }}
+                  files={knowledgeExcel ? [knowledgeExcel] : []}
+                  onClear={() => setKnowledgeExcel(null)}
+                  acceptTypes=".xlsx,.xls,.csv"
+                  title="知识Excel文件"
+                />
+              </div>
+              <div className="input-group" style={{ marginTop: '15px' }}>
+                <label>每份文件夹需要的知识图片数量：</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  value={knowledgeCount}
+                  onChange={(e) => {
+                    // 确保输入值在 0-50 之间
+                    const value = Math.min(50, Math.max(0, parseInt(e.target.value) || 0));
+                    setKnowledgeCount(value);
+                  }}
+                  className="knowledge-count-input"
+                />
+                <span className="knowledge-description">
+                  {knowledgeCount === 0 
+                    ? '默认值0：不生成知识图片' 
+                    : `每份生成 ${knowledgeCount} 张知识图片`}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="control-panel">

@@ -124,6 +124,14 @@ body {
   margin-top: 12px;
 }
 
+.file-placeholder {
+  display: block;
+  color: #1890ff;
+  font-size: 15px;
+  margin-top: 12px;
+  font-style: italic;
+}
+
 /* 已选择文件列表 */
 .selected-files {
   text-align: left;
@@ -380,19 +388,61 @@ body {
 
 .format-inputs {
   display: flex;
-  gap: 20px;
+  gap: 40px;
 }
 
-.format-inputs label {
+.format-section {
+  flex: 1;
+}
+
+.format-section h4 {
+  color: #fff;
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  font-weight: normal;
+}
+
+.format-section label {
   color: #fff;
   display: flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  margin-bottom: 10px;
 }
 
-.format-inputs input[type="radio"] {
+.format-section input[type="radio"] {
   cursor: pointer;
+}
+
+.page-limit-section {
+  margin-top: 20px;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  padding-top: 15px;
+}
+
+.page-limit-section h4 {
+  color: #fff;
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  font-weight: normal;
+}
+
+.page-limit-input {
+  width: 80px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(0,0,0,0.2);
+  color: #fff;
+  font-size: 16px;
+  text-align: center;
+}
+
+.page-limit-description {
+  margin-left: 15px;
+  color: rgba(255,255,255,0.7);
+  font-size: 14px;
 }
 
 .mode-config {
@@ -416,12 +466,123 @@ body {
 }
 
 .mode-description {
+  color: rgba(255,255,255,0.7);
+  font-size: 13px;
   margin-top: 10px;
-  padding: 10px;
-  background-color: #555;
-  border-left: 4px solid #1890ff;
-  color: #ccc;
+  line-height: 1.4;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 6px;
+}
+
+/* 知识拼接模式样式 */
+.knowledge-section {
+  margin-top: 20px;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  padding-top: 15px;
+}
+
+.knowledge-section h4 {
+  color: #fff;
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  font-weight: normal;
+}
+
+.knowledge-file-upload {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.upload-button {
+  display: inline-block;
+  padding: 8px 15px;
+  background: rgba(24,144,255,0.2);
+  border: 1px solid rgba(24,144,255,0.4);
+  border-radius: 4px;
+  color: #fff;
   font-size: 14px;
-  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.upload-button:hover {
+  background: rgba(24,144,255,0.3);
+}
+
+.file-input {
+  display: none;
+}
+
+.file-name {
+  color: rgba(255,255,255,0.8);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 250px;
+}
+
+.knowledge-count-input {
+  width: 70px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(0,0,0,0.2);
+  color: #fff;
+  font-size: 16px;
+  text-align: center;
+  margin: 0 10px;
+}
+
+.knowledge-description {
+  color: rgba(255,255,255,0.7);
+  font-size: 14px;
+  margin-left: 10px;
+}
+
+/* 知识拼接模式 */
+.knowledge-config {
+  margin-top: 20px;
+  padding: 20px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.knowledge-config h4 {
+  color: #fff;
+  margin: 0 0 15px 0;
+  font-size: 18px;
+}
+
+.knowledge-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+
+.knowledge-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.knowledge-file-uploader {
+  margin-top: 15px;
+}
+
+.mode-description {
+  color: rgba(255,255,255,0.7);
+  font-size: 13px;
+  margin-top: 10px;
+  line-height: 1.4;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 6px;
 }
  
