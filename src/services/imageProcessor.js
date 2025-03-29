@@ -150,6 +150,9 @@ export class ImageProcessor {
           folder.file(`内页${pageIndex + 1}.${imageFormat}`, pageBlob);
         });
         
+        // 记录当前内页数量，用于知识图片的连续编号
+        const contentPagesCount = contentPages.length;
+        
         // 如果启用了知识拼接模式，生成知识图片
         if (knowledgeMode && knowledgeCount > 0) {
           for (let j = 0; j < knowledgeCount; j++) {
@@ -162,7 +165,8 @@ export class ImageProcessor {
                 backgroundImages[i % backgroundImages.length], // 使用一个背景图
                 imageFormat
               );
-              folder.file(`知识图${j + 1}.${imageFormat}`, knowledgeImage);
+              // 使用内页编号的连续性，将知识图命名为紧接着的内页编号
+              folder.file(`内页${contentPagesCount + j + 1}.${imageFormat}`, knowledgeImage);
             }
           }
         }
