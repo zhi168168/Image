@@ -25,7 +25,7 @@ function App() {
   const [imageFormat, setImageFormat] = useState('jpeg');
   
   // 添加内页使用规则模式选择
-  const [pageMode, setPageMode] = useState('flexible'); // flexible宽松模式, strict严谨模式, cautious谨慎模式
+  const [pageMode, setPageMode] = useState('cautious'); // flexible宽松模式, strict严谨模式, cautious谨慎模式
   
   // 添加内页数量限制
   const [pageLimit, setPageLimit] = useState(0); // 0表示不限制
@@ -34,6 +34,13 @@ function App() {
   const [knowledgeMode, setKnowledgeMode] = useState(false); // 默认不启用知识拼接模式
   const [knowledgeCount, setKnowledgeCount] = useState(0); // 每份文件需要的知识图片数量，0表示不需要
   const [knowledgeExcel, setKnowledgeExcel] = useState(null); // 知识Excel文件
+
+  // 添加内页素材切割模式
+  const [sliceMode, setSliceMode] = useState(false); // 默认不启用切割模式
+  const [sliceCount, setSliceCount] = useState(4); // 默认切割为4份(2x2)
+
+  // 添加更多设置展开/收起状态
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
 
   // 在state中添加标题配置
   const [titleConfig, setTitleConfig] = useState({
@@ -146,6 +153,14 @@ function App() {
       }
     }
     
+    // 验证切割模式设置
+    if (sliceMode) {
+      if (sliceCount < 2 || sliceCount > 16 || sliceCount % 2 !== 0) {
+        setValidationMessage('切割份数必须是2-16之间的偶数');
+        return false;
+      }
+    }
+    
     return true;
   };
 
@@ -183,7 +198,9 @@ function App() {
         pageLimit, // 添加数量限制参数
         knowledgeMode,
         knowledgeCount,
-        knowledgeExcel
+        knowledgeExcel,
+        sliceMode, // 添加切割模式
+        sliceCount // 添加切割份数
       );
 
       // 创建下载链接
@@ -385,55 +402,120 @@ function App() {
           </div>
         </div>
 
-        <div className="knowledge-config">
-          <h4>知识拼接模式</h4>
-          <label className="knowledge-toggle">
+        {/* 内页素材切割模式 */}
+        <div className="slice-config">
+          <h4>内页素材切割</h4>
+          <label className="slice-toggle">
             <input
               type="checkbox"
-              checked={knowledgeMode}
-              onChange={(e) => setKnowledgeMode(e.target.checked)}
+              checked={sliceMode}
+              onChange={(e) => setSliceMode(e.target.checked)}
             />
-            启用知识拼接模式
+            启用内页素材切割
           </label>
           <div className="mode-description">
-            知识拼接模式：根据Excel表格生成精美的知识图片，标题和内容一一对应
+            内页素材切割：将一张图片切割成多个部分使用，可大幅减少素材消耗
           </div>
 
-          {knowledgeMode && (
-            <div className="knowledge-section">
-              <div className="knowledge-file-uploader">
-                <FileUploader 
-                  type="knowledge" 
-                  onFilesSelected={(type, files) => {
-                    if (files && files.length > 0) {
-                      setKnowledgeExcel(files[0]);
-                    }
-                  }}
-                  files={knowledgeExcel ? [knowledgeExcel] : []}
-                  onClear={() => setKnowledgeExcel(null)}
-                  acceptTypes=".xlsx,.xls,.csv"
-                  title="知识Excel文件"
-                />
-              </div>
+          {sliceMode && (
+            <div className="slice-section">
               <div className="input-group" style={{ marginTop: '15px' }}>
-                <label>每份文件夹需要的知识图片数量：</label>
+                <label>切割份数（必须为偶数）：</label>
                 <input
                   type="number"
-                  min="0"
-                  max="50"
-                  value={knowledgeCount}
+                  min="2"
+                  max="16"
+                  step="2"
+                  value={sliceCount}
                   onChange={(e) => {
-                    // 确保输入值在 0-50 之间
-                    const value = Math.min(50, Math.max(0, parseInt(e.target.value) || 0));
-                    setKnowledgeCount(value);
+                    // 确保输入值在 2-16 之间，且为偶数
+                    let value = parseInt(e.target.value) || 2;
+                    // 如果不是偶数，向下取整为偶数
+                    if (value % 2 !== 0) {
+                      value = value - 1;
+                    }
+                    value = Math.min(16, Math.max(2, value));
+                    setSliceCount(value);
                   }}
-                  className="knowledge-count-input"
+                  className="slice-count-input"
                 />
-                <span className="knowledge-description">
-                  {knowledgeCount === 0 
-                    ? '默认值0：不生成知识图片' 
-                    : `每份生成 ${knowledgeCount} 张知识图片`}
+                <span className="slice-description">
+                  {sliceCount === 4 && '2×2网格切割（4份）'}
+                  {sliceCount === 6 && '2×3或3×2网格切割（6份）'}
+                  {sliceCount === 8 && '2×4或4×2网格切割（8份）'}
+                  {sliceCount === 10 && '2×5或5×2网格切割（10份）'}
+                  {sliceCount === 12 && '3×4或4×3网格切割（12份）'}
+                  {sliceCount === 14 && '2×7或7×2网格切割（14份）'}
+                  {sliceCount === 16 && '4×4网格切割（16份）'}
+                  {![4, 6, 8, 10, 12, 14, 16].includes(sliceCount) && `自定义网格切割（${sliceCount}份）`}
                 </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 更多设置区域 */}
+        <div className="advanced-settings">
+          <div className="advanced-toggle" onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}>
+            <span className="toggle-icon">{showAdvancedSettings ? '▼' : '►'}</span>
+            <h3>更多设置</h3>
+          </div>
+          
+          {showAdvancedSettings && (
+            <div className="advanced-content">
+              {/* 知识拼接模式 */}
+              <div className="knowledge-config">
+                <h4>知识拼接模式</h4>
+                <label className="knowledge-toggle">
+                  <input
+                    type="checkbox"
+                    checked={knowledgeMode}
+                    onChange={(e) => setKnowledgeMode(e.target.checked)}
+                  />
+                  启用知识拼接模式
+                </label>
+                <div className="mode-description">
+                  知识拼接模式：根据Excel表格生成精美的知识图片，标题和内容一一对应
+                </div>
+
+                {knowledgeMode && (
+                  <div className="knowledge-section">
+                    <div className="knowledge-file-uploader">
+                      <FileUploader 
+                        type="knowledge" 
+                        onFilesSelected={(type, files) => {
+                          if (files && files.length > 0) {
+                            setKnowledgeExcel(files[0]);
+                          }
+                        }}
+                        files={knowledgeExcel ? [knowledgeExcel] : []}
+                        onClear={() => setKnowledgeExcel(null)}
+                        acceptTypes=".xlsx,.xls,.csv"
+                        title="知识Excel文件"
+                      />
+                    </div>
+                    <div className="input-group" style={{ marginTop: '15px' }}>
+                      <label>每份文件夹需要的知识图片数量：</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="50"
+                        value={knowledgeCount}
+                        onChange={(e) => {
+                          // 确保输入值在 0-50 之间
+                          const value = Math.min(50, Math.max(0, parseInt(e.target.value) || 0));
+                          setKnowledgeCount(value);
+                        }}
+                        className="knowledge-count-input"
+                      />
+                      <span className="knowledge-description">
+                        {knowledgeCount === 0 
+                          ? '默认值0：不生成知识图片' 
+                          : `每份生成 ${knowledgeCount} 张知识图片`}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

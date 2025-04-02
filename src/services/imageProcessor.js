@@ -4,7 +4,7 @@ import { saveAs } from 'file-saver';
 import { DBService } from './dbService';
 
 export class ImageProcessor {
-  static async processImages(coverImages, backgroundImages, excelFile, onProgress, titleConfig, imageFormat = 'png', pageMode = 'flexible', pageLimit = 0, knowledgeMode = false, knowledgeCount = 0, knowledgeExcel = null) {
+  static async processImages(coverImages, backgroundImages, excelFile, onProgress, titleConfig, imageFormat = 'png', pageMode = 'flexible', pageLimit = 0, knowledgeMode = false, knowledgeCount = 0, knowledgeExcel = null, sliceMode = false, sliceCount = 4) {
     // 判断是否使用的是默认黑色封面
     const isUsingBlackCover = coverImages?.[0]?.name === 'black_cover.png';
 
@@ -26,6 +26,21 @@ export class ImageProcessor {
         }
       }
       
+      // 处理素材切割（如果启用）
+      let processedBackgrounds = [];
+      if (sliceMode) {
+        onProgress(10, '正在切割内页素材...');
+        // 对每张背景图进行切割
+        for (const backgroundImage of backgroundImages) {
+          const slices = await this.sliceBackgroundImage(backgroundImage, sliceCount);
+          processedBackgrounds = [...processedBackgrounds, ...slices];
+        }
+        onProgress(15, `内页素材切割完成，共生成${processedBackgrounds.length}个素材片段`);
+      } else {
+        // 不切割时，直接使用原始背景图
+        processedBackgrounds = backgroundImages;
+      }
+      
       // 创建 ZIP 文件
       const zip = new JSZip();
       
@@ -41,7 +56,7 @@ export class ImageProcessor {
       // 处理每组图片
       for (let i = 0; i < totalSteps; i++) {
         onProgress(
-          Math.round((i / totalSteps) * 90),
+          Math.round(15 + (i / totalSteps) * 80),
           `正在处理第 ${i + 1}/${totalSteps} 组图片...`
         );
 
@@ -57,8 +72,15 @@ export class ImageProcessor {
         if (pageMode === 'flexible') {
           // 宽松模式：使用对应的背景图
           // 如果背景图不够，则循环使用
-          const backgroundIndex = i % backgroundImages.length;
-          backgroundCanvas = await this.processBackgroundImage(backgroundImages[backgroundIndex]);
+          const backgroundIndex = i % processedBackgrounds.length;
+          
+          if (sliceMode) {
+            // 切割模式下，processedBackgrounds已经是Canvas对象数组
+            backgroundCanvas = processedBackgrounds[backgroundIndex];
+          } else {
+            // 非切割模式，需要处理背景图
+            backgroundCanvas = await this.processBackgroundImage(processedBackgrounds[backgroundIndex]);
+          }
         }
         
         // 生成内页
@@ -75,13 +97,24 @@ export class ImageProcessor {
         } else if (pageMode === 'cautious') {
           // 谨慎模式：每个内页使用不同的背景，只有第一页显示标题
           try {
-            contentPages = await this.generateContentPagesCautious(
-              backgroundImages,
-              backgroundIndex,
-              textContent,
-              titleConfig,
-              imageFormat
-            );
+            if (sliceMode) {
+              // 切割模式下，直接使用处理好的背景Canvas
+              contentPages = await this.generateContentPagesCautiousWithProcessedBackgrounds(
+                processedBackgrounds,
+                backgroundIndex,
+                textContent,
+                titleConfig,
+                imageFormat
+              );
+            } else {
+              contentPages = await this.generateContentPagesCautious(
+                processedBackgrounds,
+                backgroundIndex,
+                textContent,
+                titleConfig,
+                imageFormat
+              );
+            }
             
             // 更新背景索引
             backgroundIndex += contentPages.length;
@@ -92,13 +125,24 @@ export class ImageProcessor {
         } else {
           // 严谨模式：每个内页使用不同的背景
           try {
-            contentPages = await this.generateContentPagesStrict(
-              backgroundImages,
-              backgroundIndex,
-              textContent,
-              titleConfig,
-              imageFormat
-            );
+            if (sliceMode) {
+              // 切割模式下，直接使用处理好的背景Canvas
+              contentPages = await this.generateContentPagesStrictWithProcessedBackgrounds(
+                processedBackgrounds,
+                backgroundIndex,
+                textContent,
+                titleConfig,
+                imageFormat
+              );
+            } else {
+              contentPages = await this.generateContentPagesStrict(
+                processedBackgrounds,
+                backgroundIndex,
+                textContent,
+                titleConfig,
+                imageFormat
+              );
+            }
             
             // 更新背景索引
             backgroundIndex += contentPages.length;
@@ -162,7 +206,7 @@ export class ImageProcessor {
               const knowledgeImage = await this.generateKnowledgeImage(
                 knowledge.title, 
                 knowledge.content,
-                backgroundImages[i % backgroundImages.length], // 使用一个背景图
+                processedBackgrounds[i % processedBackgrounds.length], // 使用一个背景图
                 imageFormat
               );
               // 使用内页编号的连续性，将知识图命名为紧接着的内页编号
@@ -834,5 +878,414 @@ export class ImageProcessor {
     ctx.quadraticCurveTo(x, y, x + radius, y);
     ctx.closePath();
     ctx.fill();
+  }
+  
+  // 切割背景图片为多个部分
+  static async sliceBackgroundImage(backgroundImage, sliceCount) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        // 确定网格布局（行和列）
+        let rows, cols;
+        
+        // 根据图片的原始比例和切割数量确定最佳的行列数
+        const aspectRatio = img.width / img.height;
+        
+        if (sliceCount === 4) {
+          // 2x2网格
+          rows = 2;
+          cols = 2;
+        } else if (sliceCount === 6) {
+          // 根据图片比例决定是2x3还是3x2
+          if (aspectRatio >= 1) {
+            // 宽图：3x2
+            rows = 2;
+            cols = 3;
+          } else {
+            // 高图：2x3
+            rows = 3;
+            cols = 2;
+          }
+        } else if (sliceCount === 8) {
+          // 根据图片比例决定是2x4还是4x2
+          if (aspectRatio >= 1) {
+            // 宽图：4x2
+            rows = 2;
+            cols = 4;
+          } else {
+            // 高图：2x4
+            rows = 4;
+            cols = 2;
+          }
+        } else if (sliceCount === 10) {
+          // 根据图片比例决定是2x5还是5x2
+          if (aspectRatio >= 1) {
+            // 宽图：5x2
+            rows = 2;
+            cols = 5;
+          } else {
+            // 高图：2x5
+            rows = 5;
+            cols = 2;
+          }
+        } else if (sliceCount === 12) {
+          // 根据图片比例决定是3x4还是4x3
+          if (aspectRatio >= 1) {
+            // 宽图：4x3
+            rows = 3;
+            cols = 4;
+          } else {
+            // 高图：3x4
+            rows = 4;
+            cols = 3;
+          }
+        } else if (sliceCount === 14) {
+          // 根据图片比例决定是2x7还是7x2
+          if (aspectRatio >= 1) {
+            // 宽图：7x2
+            rows = 2;
+            cols = 7;
+          } else {
+            // 高图：2x7
+            rows = 7;
+            cols = 2;
+          }
+        } else if (sliceCount === 16) {
+          // 4x4网格
+          rows = 4;
+          cols = 4;
+        } else {
+          // 默认情况：尝试找到最接近的因子
+          let bestDiff = Number.MAX_VALUE;
+          for (let r = 1; r <= sliceCount; r++) {
+            if (sliceCount % r === 0) {
+              const c = sliceCount / r;
+              const diff = Math.abs(aspectRatio - c / r);
+              if (diff < bestDiff) {
+                bestDiff = diff;
+                rows = r;
+                cols = c;
+              }
+            }
+          }
+        }
+        
+        // 计算每个切片的尺寸
+        const sliceWidth = img.width / cols;
+        const sliceHeight = img.height / rows;
+        
+        // 创建切片
+        const slices = [];
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            // 为每个切片创建一个Canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = 1242;  // 保持目标尺寸一致
+            canvas.height = 1660;
+            const ctx = canvas.getContext('2d');
+            
+            // 绘制黑色背景
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 计算源图像的切片区域
+            const sx = col * sliceWidth;
+            const sy = row * sliceHeight;
+            const sWidth = sliceWidth;
+            const sHeight = sliceHeight;
+            
+            // 计算缩放比例，使切片填满目标画布
+            const scale = Math.max(canvas.width / sWidth, canvas.height / sHeight);
+            const scaledWidth = sWidth * scale;
+            const scaledHeight = sHeight * scale;
+            
+            // 计算绘制位置，使切片居中
+            const dx = (canvas.width - scaledWidth) / 2;
+            const dy = (canvas.height - scaledHeight) / 2;
+            
+            // 设置透明度
+            ctx.globalAlpha = 0.35;
+            
+            // 绘制切片
+            ctx.drawImage(
+              img,
+              sx, sy, sWidth, sHeight,  // 源图像区域
+              dx, dy, scaledWidth, scaledHeight  // 目标画布区域
+            );
+            
+            slices.push(canvas);
+          }
+        }
+        
+        resolve(slices);
+      };
+      img.src = URL.createObjectURL(backgroundImage);
+    });
+  }
+
+  static async generateContentPagesStrictWithProcessedBackgrounds(processedBackgrounds, startIndex, textContent, titleConfig, imageFormat = 'png') {
+    // 随机打乱文字内容
+    const shuffledContent = this.shuffleArray([...textContent]);
+    const pages = [];
+    let currentPage = null;
+    let lineNumber = 1;
+    let currentTextIndex = 0;
+    let currentBackgroundIndex = startIndex;
+
+    // 创建新页面
+    const createNewPage = async () => {
+      // 检查是否还有足够的背景图
+      if (currentBackgroundIndex >= processedBackgrounds.length) {
+        throw new Error('内页素材不够');
+      }
+      
+      // 获取当前背景Canvas
+      const backgroundCanvas = processedBackgrounds[currentBackgroundIndex];
+      currentBackgroundIndex++;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 1242;
+      canvas.height = 1660;
+      const ctx = canvas.getContext('2d');
+
+      // 复制背景
+      ctx.drawImage(backgroundCanvas, 0, 0);
+
+      // 设置标题字体以计算高度
+      ctx.font = '80px sans-serif';
+      const titleMetrics = ctx.measureText(titleConfig.text);
+      const titleHeight = titleMetrics.actualBoundingBoxAscent + titleMetrics.actualBoundingBoxDescent;
+      const titleBackgroundHeight = titleHeight * 1.2;
+      const titleWidth = titleMetrics.width * 1.2;
+
+      // 计算标题背景位置
+      const titleBackgroundX = (canvas.width - titleWidth) / 2;
+      const cornerRadius = 10;
+
+      // 使用配置的背景色
+      ctx.fillStyle = titleConfig.backgroundColor;
+      ctx.beginPath();
+      ctx.moveTo(titleBackgroundX + cornerRadius, 80);
+      ctx.lineTo(titleBackgroundX + titleWidth - cornerRadius, 80);
+      ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80, titleBackgroundX + titleWidth, 80 + cornerRadius);
+      ctx.lineTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight - cornerRadius);
+      ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight, titleBackgroundX + titleWidth - cornerRadius, 80 + titleBackgroundHeight);
+      ctx.lineTo(titleBackgroundX + cornerRadius, 80 + titleBackgroundHeight);
+      ctx.quadraticCurveTo(titleBackgroundX, 80 + titleBackgroundHeight, titleBackgroundX, 80 + titleBackgroundHeight - cornerRadius);
+      ctx.lineTo(titleBackgroundX, 80 + cornerRadius);
+      ctx.quadraticCurveTo(titleBackgroundX, 80, titleBackgroundX + cornerRadius, 80);
+      ctx.closePath();
+      ctx.fill();
+
+      // 绘制标题文字
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.fillText(titleConfig.text, canvas.width / 2, 80 + titleHeight);
+
+      return {
+        canvas,
+        ctx,
+        currentY: 80 + titleBackgroundHeight + 100,
+        linesOnPage: 0
+      };
+    };
+
+    // 初始化第一页
+    currentPage = await createNewPage();
+
+    while (currentTextIndex < shuffledContent.length) {
+      const text = shuffledContent[currentTextIndex];
+      const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+      
+      // 检查当前页是否还能容纳这段文字
+      const totalLinesNeeded = lines.length;
+      const willExceedLimit = currentPage.linesOnPage + totalLinesNeeded > 27;
+
+      if (willExceedLimit) {
+        pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+        currentPage = await createNewPage();
+      }
+
+      // 绘制文本
+      currentPage.ctx.font = '45px sans-serif'; // 字号改为45px
+      currentPage.ctx.fillStyle = '#FFFFFF';
+      currentPage.ctx.textAlign = 'left';
+
+      lines.forEach((line, index) => {
+        if (index === 0) {
+          currentPage.ctx.fillText(
+            `${lineNumber}. ${line}`,
+            80, // 左边距改为80px
+            currentPage.currentY
+          );
+          lineNumber++;
+        } else {
+          currentPage.ctx.fillText(
+            line,
+            80, // 左边距改为80px
+            currentPage.currentY
+          );
+        }
+        currentPage.currentY += 60; // 行间距改为60px
+        currentPage.linesOnPage++;
+      });
+
+      currentPage.currentY += 10; // 段落间距保持不变
+      currentTextIndex++;
+    }
+
+    // 添加最后一页
+    if (currentPage && currentPage.linesOnPage > 0) {
+      pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+    }
+
+    return pages;
+  }
+
+  // 添加新的谨慎模式函数（切割模式）：基于严谨模式，但只有第一页显示标题
+  static async generateContentPagesCautiousWithProcessedBackgrounds(processedBackgrounds, startIndex, textContent, titleConfig, imageFormat = 'png') {
+    // 随机打乱文字内容
+    const shuffledContent = this.shuffleArray([...textContent]);
+    const pages = [];
+    let currentPage = null;
+    let lineNumber = 1;
+    let currentTextIndex = 0;
+    let currentBackgroundIndex = startIndex;
+    let isFirstPage = true;
+
+    // 计算文本会占用的高度
+    const calculateTextHeight = (ctx, text, fontSize, maxWidth) => {
+      const lines = this.wrapText(ctx, text, fontSize, maxWidth);
+      // 每行高度为60px，段落间距10px
+      return lines.length * 60 + 10; 
+    };
+
+    // 创建新页面
+    const createNewPage = async () => {
+      // 检查是否还有足够的背景图
+      if (currentBackgroundIndex >= processedBackgrounds.length) {
+        throw new Error('内页素材不够');
+      }
+      
+      // 获取当前背景Canvas
+      const backgroundCanvas = processedBackgrounds[currentBackgroundIndex];
+      currentBackgroundIndex++;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 1242;
+      canvas.height = 1660;
+      const ctx = canvas.getContext('2d');
+
+      // 复制背景
+      ctx.drawImage(backgroundCanvas, 0, 0);
+
+      // 只在第一页显示标题
+      if (isFirstPage) {
+        // 设置标题字体以计算高度
+        ctx.font = '80px sans-serif';
+        const titleMetrics = ctx.measureText(titleConfig.text);
+        const titleHeight = titleMetrics.actualBoundingBoxAscent + titleMetrics.actualBoundingBoxDescent;
+        const titleBackgroundHeight = titleHeight * 1.2;
+        const titleWidth = titleMetrics.width * 1.2;
+
+        // 计算标题背景位置
+        const titleBackgroundX = (canvas.width - titleWidth) / 2;
+        const cornerRadius = 10;
+
+        // 使用配置的背景色
+        ctx.fillStyle = titleConfig.backgroundColor;
+        ctx.beginPath();
+        ctx.moveTo(titleBackgroundX + cornerRadius, 80);
+        ctx.lineTo(titleBackgroundX + titleWidth - cornerRadius, 80);
+        ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80, titleBackgroundX + titleWidth, 80 + cornerRadius);
+        ctx.lineTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight - cornerRadius);
+        ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight, titleBackgroundX + titleWidth - cornerRadius, 80 + titleBackgroundHeight);
+        ctx.lineTo(titleBackgroundX + cornerRadius, 80 + titleBackgroundHeight);
+        ctx.quadraticCurveTo(titleBackgroundX, 80 + titleBackgroundHeight, titleBackgroundX, 80 + titleBackgroundHeight - cornerRadius);
+        ctx.lineTo(titleBackgroundX, 80 + cornerRadius);
+        ctx.quadraticCurveTo(titleBackgroundX, 80, titleBackgroundX + cornerRadius, 80);
+        ctx.closePath();
+        ctx.fill();
+
+        // 绘制标题文字
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'center';
+        ctx.fillText(titleConfig.text, canvas.width / 2, 80 + titleHeight);
+
+        return {
+          canvas,
+          ctx,
+          currentY: 80 + titleBackgroundHeight + 100,
+          contentStartY: 80 + titleBackgroundHeight + 100,
+          linesOnPage: 0
+        };
+      } else {
+        // 非第一页，不显示标题
+        const topMargin = 80; // 保持与第一页相同的上边距
+        return {
+          canvas,
+          ctx,
+          currentY: topMargin + 80, // 增加非第一页的顶部边距，给予更多空白
+          contentStartY: topMargin + 80,
+          linesOnPage: 0
+        };
+      }
+    };
+
+    // 初始化第一页
+    currentPage = await createNewPage();
+
+    while (currentTextIndex < shuffledContent.length) {
+      const text = shuffledContent[currentTextIndex];
+      const testCtx = currentPage.ctx;
+      // 计算当前文本需要的高度
+      const textHeight = calculateTextHeight(testCtx, text, 45, 1082);
+      
+      // 计算当前页面的可用空间
+      const availableHeight = 1660 - 80 - (currentPage.currentY - currentPage.contentStartY);
+      
+      // 判断是否可以完整显示当前文本
+      if (currentPage.currentY + textHeight > 1650) { // 将底部边距从1600减少到仅10像素(1660-10)
+        // 当前页不够放下这个文本，创建新页
+        pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+        isFirstPage = false;
+        currentPage = await createNewPage();
+      }
+      
+      // 绘制文本
+      const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+      currentPage.ctx.font = '45px sans-serif';
+      currentPage.ctx.fillStyle = '#FFFFFF';
+      currentPage.ctx.textAlign = 'left';
+
+      lines.forEach((line, index) => {
+        if (index === 0) {
+          currentPage.ctx.fillText(
+            `${lineNumber}. ${line}`,
+            80,
+            currentPage.currentY
+          );
+          lineNumber++;
+        } else {
+          currentPage.ctx.fillText(
+            line,
+            80,
+            currentPage.currentY
+          );
+        }
+        currentPage.currentY += 60;
+        currentPage.linesOnPage++;
+      });
+
+      currentPage.currentY += 10; // 段落间距
+      currentTextIndex++;
+    }
+
+    // 添加最后一页
+    if (currentPage && currentPage.linesOnPage > 0) {
+      pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+    }
+
+    return pages;
   }
 } 
