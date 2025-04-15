@@ -1,48 +1,43 @@
 #!/bin/bash
 
+# 定义服务器信息
+SERVER_IP="14.103.203.205"
+SERVER_USER="root"
+SERVER_DIR="/var/www/image"
+NGINX_CONF_DIR="/etc/nginx/sites-available"
+
 echo "开始部署..."
 
-# 定义变量
-SERVER="112.124.43.20"
-DEPLOY_PATH="/var/www/project-zidingyi"
-SSH_USER="root"
+# 在服务器上创建目录（如果不存在）
+echo "创建服务器目录..."
+ssh ${SERVER_USER}@${SERVER_IP} "mkdir -p ${SERVER_DIR}"
 
-# 构建项目
-echo "开始构建项目..."
-rm -rf dist/
-npm run build || {
-    echo "构建失败"
-    exit 1
-}
+# 上传构建好的文件
+echo "上传项目文件..."
+scp -r ./dist/* ${SERVER_USER}@${SERVER_IP}:${SERVER_DIR}/
 
-# 压缩构建文件
-echo "压缩构建文件..."
-tar -czf dist.tar.gz dist/ || {
-    echo "压缩失败"
-    exit 1
-}
+# 检查Nginx是否安装，如果未安装则安装
+echo "检查并安装Nginx（如果需要）..."
+ssh ${SERVER_USER}@${SERVER_IP} "if ! command -v nginx &> /dev/null; then apt-get update && apt-get install -y nginx; fi"
 
-# 传输到服务器
-echo "传输文件到服务器..."
-scp -o StrictHostKeyChecking=no dist.tar.gz ${SSH_USER}@${SERVER}:${DEPLOY_PATH}/ || {
-    echo "文件传输失败"
-    exit 1
-}
+# 确保Nginx配置目录存在
+echo "创建Nginx配置目录..."
+ssh ${SERVER_USER}@${SERVER_IP} "mkdir -p ${NGINX_CONF_DIR} /etc/nginx/sites-enabled"
 
-# SSH到服务器执行部署
-echo "在服务器上执行部署..."
-ssh -t -o StrictHostKeyChecking=no ${SSH_USER}@${SERVER} bash -c "'
-    cd ${DEPLOY_PATH} && \
-    tar -xzf dist.tar.gz && \
-    rm dist.tar.gz && \
-    chown -R www-data:www-data dist/ && \
-    chmod -R 755 dist/ && \
-    nginx -t && \
-    systemctl restart nginx
-'"
+# 上传Nginx配置文件
+echo "上传Nginx配置文件..."
+scp ./image.conf ${SERVER_USER}@${SERVER_IP}:${NGINX_CONF_DIR}/image.conf
 
-# 清理本地临时文件
-echo "清理本地临时文件..."
-rm dist.tar.gz
+# 建立软链接到sites-enabled
+echo "启用站点配置..."
+ssh ${SERVER_USER}@${SERVER_IP} "ln -sf ${NGINX_CONF_DIR}/image.conf /etc/nginx/sites-enabled/ || echo '软链接创建失败，可能已存在'"
 
-echo "部署完成"
+# 重启Nginx服务
+echo "测试Nginx配置并重启服务..."
+ssh ${SERVER_USER}@${SERVER_IP} "nginx -t && systemctl restart nginx || service nginx restart"
+
+# 配置防火墙（如果需要）
+echo "配置防火墙规则..."
+ssh ${SERVER_USER}@${SERVER_IP} "ufw allow 4115/tcp || echo '请手动配置防火墙开放4115端口'"
+
+echo "部署完成！应用程序应该可以通过 http://${SERVER_IP}:4115 访问"

@@ -28,7 +28,7 @@ const FileUploader = ({
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files || []);
     if (selectedFiles.length > 0) {
-      onFilesSelected(type, selectedFiles);
+    onFilesSelected(type, selectedFiles);
     }
   };
   
@@ -464,19 +464,19 @@ const FileUploader = ({
 
   return (
     <div className="file-uploader">
-      <div 
+    <div 
         className={`uploader-area ${files.length > 0 ? 'has-files' : ''}`}
         onClick={handleClick}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
         <div className="upload-icon">
           <i className="fas fa-upload"></i>
         </div>
         <div className="upload-text">
           {getDisplayText()}
-          {files.length > 0 && (
+        {files.length > 0 && (
             <div className="file-count">
               {files.length} 个文件
             </div>
@@ -504,7 +504,7 @@ const FileUploader = ({
           mozdirectory="true"
         />
       )}
-      
+
       {files.length > 0 && (
         <button className="clear-button" onClick={handleClear}>
           清除

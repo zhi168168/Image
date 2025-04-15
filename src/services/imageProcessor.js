@@ -219,16 +219,18 @@ export class ImageProcessor {
               console.log(`处理单图模式封面: ${coverGroup[0].name || '未命名文件'}`);
               try {
                 const processedCover = await this.processImage(coverGroup[0], imageFormat);
-                folder.file(`封面图.${imageFormat}`, processedCover);
-                console.log(`封面图处理完成: 封面图.${imageFormat}`);
+                // 将封面图命名为内页1
+                folder.file(`内页1.${imageFormat}`, processedCover);
+                console.log(`封面图处理完成: 内页1.${imageFormat}`);
               } catch (error) {
                 console.error(`处理封面图失败:`, error);
                 // 创建一个简单的占位图，避免没有封面图
                 try {
                   const placeholderCanvas = this.createPlaceholderImage("封面图生成失败", imageFormat);
                   const placeholderBlob = await this.canvasToBlob(placeholderCanvas, imageFormat);
-                  folder.file(`封面图.${imageFormat}`, placeholderBlob);
-                  console.log(`已创建替代封面图`);
+                  // 将占位图命名为内页1
+                  folder.file(`内页1.${imageFormat}`, placeholderBlob);
+                  console.log(`已创建替代封面图，命名为内页1`);
                 } catch (e) {
                   console.error("创建替代封面图也失败:", e);
                 }
@@ -261,9 +263,9 @@ export class ImageProcessor {
               // 记录原始文件名到索引的映射，用于输出文件命名
               const fileNameMapping = {};
               coverGroup.forEach((file, index) => {
-                const origName = file.name.split('.')[0].trim();
-                fileNameMapping[index] = origName;
-                console.log(`文件索引映射: [${index}] => ${origName}`);
+                // 不再使用原始文件名，而是使用从1开始的新索引
+                fileNameMapping[index] = (index + 1).toString();
+                console.log(`文件索引映射: [${index}] => ${fileNameMapping[index]} (原始文件: ${file.name})`);
               });
               
               for (let j = 0; j < coverGroup.length; j++) {
@@ -293,11 +295,10 @@ export class ImageProcessor {
                   }
                   
                   if (processedCover) {
-                    // 使用原始文件名作为编号依据
-                    const origName = fileNameMapping[j] || (j + 1).toString();
-                    // 使用正确的文件名(与索引顺序保持一致)
-                    folder.file(`封面${origName}.${imageFormat}`, processedCover);
-                    console.log(`封面图处理完成: 封面${origName}.${imageFormat} (来自 ${fileName})`);
+                    // 使用新的命名规则：所有图片按顺序命名为内页
+                    const newIndex = j + 1; // 从1开始的新索引
+                    folder.file(`内页${newIndex}.${imageFormat}`, processedCover);
+                    console.log(`封面图处理完成: 内页${newIndex}.${imageFormat} (来自 ${fileName})`);
                     successCount++;
                   }
                 } catch (error) {
@@ -306,14 +307,14 @@ export class ImageProcessor {
                   
                   // 创建一个简单的占位图，避免顺序混乱
                   try {
-                    // 使用原始文件名作为编号依据
-                    const origName = fileNameMapping[j] || (j + 1).toString();
-                    const placeholderCanvas = this.createPlaceholderImage(`封面${origName}加载失败`, imageFormat);
+                    // 使用新的命名规则
+                    const newIndex = j + 1; // 从1开始的新索引
+                    const placeholderCanvas = this.createPlaceholderImage(`内页${newIndex}加载失败`, imageFormat);
                     const placeholderBlob = await this.canvasToBlob(placeholderCanvas, imageFormat);
-                    folder.file(`封面${origName}.${imageFormat}`, placeholderBlob);
-                    console.log(`已创建替代封面图 封面${origName}.${imageFormat} (来自 ${fileName})`);
+                    folder.file(`内页${newIndex}.${imageFormat}`, placeholderBlob);
+                    console.log(`已创建替代封面图 内页${newIndex}.${imageFormat} (来自 ${fileName})`);
                   } catch (e) {
-                    console.error(`创建替代封面图 ${fileNameMapping[j] || (j+1)} 也失败:`, e);
+                    console.error(`创建替代封面图 ${j+1} 也失败:`, e);
                   }
                 }
               }
@@ -330,11 +331,15 @@ export class ImageProcessor {
         
         // 添加内页
         contentPages.forEach((pageBlob, pageIndex) => {
-          folder.file(`内页${pageIndex + 1}.${imageFormat}`, pageBlob);
+          // 根据封面图数量调整内页编号
+          const coverCount = coverGroup && !isUsingBlackCover ? coverGroup.length : 
+                             (coverMode === 'single' && !isUsingBlackCover ? 1 : 0);
+          folder.file(`内页${pageIndex + 1 + coverCount}.${imageFormat}`, pageBlob);
         });
         
-        // 记录当前内页数量，用于知识图片的连续编号
-        const contentPagesCount = contentPages.length;
+        // 记录当前图片总数，用于知识图片的连续编号
+        const totalImagesCount = (coverGroup && !isUsingBlackCover ? coverGroup.length : 
+                               (coverMode === 'single' && !isUsingBlackCover ? 1 : 0)) + contentPages.length;
         
         // 如果启用了知识拼接模式，生成知识图片
         if (knowledgeMode && knowledgeCount > 0) {
@@ -346,7 +351,7 @@ export class ImageProcessor {
                 knowledge.content,
                 imageFormat
               );
-              folder.file(`内页${contentPagesCount + k + 1}.${imageFormat}`, knowledgeImage);
+              folder.file(`内页${totalImagesCount + k + 1}.${imageFormat}`, knowledgeImage);
             }
           }
         }
