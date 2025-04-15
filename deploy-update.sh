@@ -11,4 +11,4 @@ echo "上传构建文件..."
 scp -r dist/* $SERVER:$DEPLOY_PATH/
 
 echo "部署完成！"
-echo "图片处理工具已更新到版本1.2"
+echo "图片处理工具已更新到版本1.3"

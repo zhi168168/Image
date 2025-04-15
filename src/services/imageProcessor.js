@@ -4,24 +4,37 @@ import { saveAs } from 'file-saver';
 import { DBService } from './dbService';
 
 export class ImageProcessor {
-  static async processImages(coverImages, backgroundImages, excelFile, onProgress, titleConfig, imageFormat = 'png', pageMode = 'flexible', pageLimit = 0, knowledgeMode = false, knowledgeCount = 0, knowledgeExcel = null, sliceMode = false, sliceCount = 4) {
+  static async processImages(coverImages, backgroundImages, excelFile, onProgress, titleConfig, imageFormat = 'png', pageMode = 'flexible', pageLimit = 0, knowledgeMode = false, knowledgeCount = 0, knowledgeExcel = null, sliceMode = false, sliceCount = 4, coverMode = 'single') {
+    console.log("===== 开始处理图片 =====");
+    console.log("封面模式:", coverMode);
+    console.log("封面图数量:", coverImages ? coverImages.length : 0);
+    console.log("背景图数量:", backgroundImages.length);
+    console.log("页面模式:", pageMode);
+    console.log("页面限制:", pageLimit);
+    console.log("切割模式:", sliceMode ? `启用 (${sliceCount}份)` : "禁用");
+    console.log("知识拼接模式:", knowledgeMode ? `启用 (${knowledgeCount}份)` : "禁用");
+
     // 判断是否使用的是默认黑色封面
     const isUsingBlackCover = coverImages?.[0]?.name === 'black_cover.png';
+    console.log("是否使用默认黑色封面:", isUsingBlackCover);
 
     try {
       // 解析Excel文件
       onProgress(0, '正在解析表格文件...');
       const textContent = await this.parseExcel(excelFile);
+      console.log("Excel内容解析完成，共", textContent.length, "条记录");
       
       // 如果启用知识拼接模式，解析知识Excel文件
       let knowledgeData = [];
       if (knowledgeMode && knowledgeCount > 0 && knowledgeExcel) {
         onProgress(5, '正在解析知识文件...');
         knowledgeData = await this.parseKnowledgeExcel(knowledgeExcel);
+        console.log("知识Excel解析完成，共", knowledgeData.length, "条记录");
         
         // 检查知识条目是否足够
         const requiredKnowledge = knowledgeCount * (coverImages?.length || 1);
         if (knowledgeData.length < requiredKnowledge) {
+          console.error("知识条目不足", `需要${requiredKnowledge}条，但只有${knowledgeData.length}条`);
           throw new Error(`知识条目不足，需要${requiredKnowledge}条，但只有${knowledgeData.length}条`);
         }
       }
@@ -32,20 +45,30 @@ export class ImageProcessor {
         onProgress(10, '正在切割内页素材...');
         // 对每张背景图进行切割
         for (const backgroundImage of backgroundImages) {
+          console.log(`切割背景图: ${backgroundImage.name}`);
           const slices = await this.sliceBackgroundImage(backgroundImage, sliceCount);
           processedBackgrounds = [...processedBackgrounds, ...slices];
         }
+        console.log(`内页素材切割完成，共生成 ${processedBackgrounds.length} 个素材片段`);
         onProgress(15, `内页素材切割完成，共生成${processedBackgrounds.length}个素材片段`);
       } else {
         // 不切割时，直接使用原始背景图
         processedBackgrounds = backgroundImages;
+        console.log("不启用切割模式，使用原始背景图", processedBackgrounds.length, "张");
       }
+
+      // 组织封面图
+      console.log("开始组织封面图...");
+      const organizedCovers = await this.organizeCovers(coverImages, coverMode);
+      console.log(`封面图组织完成，共识别到 ${organizedCovers.length} 个封面图组`);
+      onProgress(17, `封面图组织完成，识别到${organizedCovers.length}个封面图组`);
       
       // 创建 ZIP 文件
       const zip = new JSZip();
       
-      // 处理文件夹数量 - 使用封面图数量或者1（如果没有封面图）
-      const totalSteps = coverImages?.length || 1;
+      // 处理文件夹数量 - 使用封面图组数量或者1（如果没有封面图）
+      const totalSteps = organizedCovers.length || 1;
+      console.log(`需要处理的文件夹总数: ${totalSteps}`);
 
       // 背景图片索引（用于严谨模式）
       let backgroundIndex = 0;
@@ -56,15 +79,14 @@ export class ImageProcessor {
       // 处理每组图片
       for (let i = 0; i < totalSteps; i++) {
         onProgress(
-          Math.round(15 + (i / totalSteps) * 80),
+          Math.round(20 + (i / totalSteps) * 75),
           `正在处理第 ${i + 1}/${totalSteps} 组图片...`
         );
+        console.log(`开始处理第 ${i + 1}/${totalSteps} 组图片`);
 
-        // 处理封面图片 - 可能存在或不存在
-        let processedCover = null;
-        if (coverImages && coverImages[i]) {
-          processedCover = await this.processImage(coverImages[i], imageFormat);
-        }
+        // 处理封面图片组 - 可能存在或不存在
+        let coverGroup = organizedCovers[i] || null;
+        console.log(`当前封面图组:`, coverGroup ? `包含 ${coverGroup.length} 张图片` : "无封面图");
         
         // 处理背景图片
         let backgroundCanvas;
@@ -184,9 +206,126 @@ export class ImageProcessor {
         // 创建文件夹并添加文件
         const folder = zip.folder(folderName);
         
-        // 只有在有封面图且不是黑色封面的情况下才添加封面图
-        if (processedCover && !isUsingBlackCover) {
-          folder.file(`封面图.${imageFormat}`, processedCover);
+        // 处理封面图
+        if (coverGroup && !isUsingBlackCover) {
+          console.log(`开始处理封面图组: ${coverGroup.length}张图片`);
+          
+          // 检查封面组是否有效
+          if (coverGroup.length === 0) {
+            console.warn("警告: 封面组为空");
+          } else {
+            if (coverMode === 'single') {
+              // 单图模式：只使用第一张封面图
+              console.log(`处理单图模式封面: ${coverGroup[0].name || '未命名文件'}`);
+              try {
+                const processedCover = await this.processImage(coverGroup[0], imageFormat);
+                folder.file(`封面图.${imageFormat}`, processedCover);
+                console.log(`封面图处理完成: 封面图.${imageFormat}`);
+              } catch (error) {
+                console.error(`处理封面图失败:`, error);
+                // 创建一个简单的占位图，避免没有封面图
+                try {
+                  const placeholderCanvas = this.createPlaceholderImage("封面图生成失败", imageFormat);
+                  const placeholderBlob = await this.canvasToBlob(placeholderCanvas, imageFormat);
+                  folder.file(`封面图.${imageFormat}`, placeholderBlob);
+                  console.log(`已创建替代封面图`);
+                } catch (e) {
+                  console.error("创建替代封面图也失败:", e);
+                }
+              }
+            } else {
+              // 多图模式：处理所有封面图并按顺序命名
+              console.log(`处理多图模式封面组，共 ${coverGroup.length} 张图片`);
+              let successCount = 0;
+              let failedFiles = [];
+              
+              // 首先对coverGroup进行排序，确保名称的正确顺序
+              coverGroup.sort((a, b) => {
+                // 尝试提取文件名（不带扩展名）
+                const nameA = a.name.split('.')[0].trim();
+                const nameB = b.name.split('.')[0].trim();
+                
+                // 检查两个文件名是否都是纯数字
+                const isNumericA = /^\d+$/.test(nameA);
+                const isNumericB = /^\d+$/.test(nameB);
+                
+                // 如果两个都是数字，按数值大小排序
+                if (isNumericA && isNumericB) {
+                  return parseInt(nameA, 10) - parseInt(nameB, 10);
+                }
+                
+                // 否则按字典序排序
+                return nameA.localeCompare(nameB);
+              });
+              
+              // 记录原始文件名到索引的映射，用于输出文件命名
+              const fileNameMapping = {};
+              coverGroup.forEach((file, index) => {
+                const origName = file.name.split('.')[0].trim();
+                fileNameMapping[index] = origName;
+                console.log(`文件索引映射: [${index}] => ${origName}`);
+              });
+              
+              for (let j = 0; j < coverGroup.length; j++) {
+                const coverFile = coverGroup[j];
+                const fileName = coverFile.name || `未命名文件_${j+1}`;
+                console.log(`处理第 ${j+1} 张封面图: ${fileName}`);
+                
+                try {
+                  // 尝试处理该封面图，最多重试2次
+                  let processedCover = null;
+                  let attempts = 0;
+                  
+                  while (attempts < 3 && !processedCover) {
+                    try {
+                      processedCover = await this.processImage(coverFile, imageFormat);
+                      break;
+                    } catch (retryError) {
+                      attempts++;
+                      if (attempts < 3) {
+                        console.warn(`处理封面图 ${fileName} 第 ${attempts} 次尝试失败，将重试...`);
+                        await new Promise(r => setTimeout(r, 100)); // 短暂延迟后重试
+                      } else {
+                        console.error(`处理封面图 ${fileName} 失败，已重试 ${attempts-1} 次:`, retryError);
+                        throw retryError; // 超过重试次数，抛出错误
+                      }
+                    }
+                  }
+                  
+                  if (processedCover) {
+                    // 使用原始文件名作为编号依据
+                    const origName = fileNameMapping[j] || (j + 1).toString();
+                    // 使用正确的文件名(与索引顺序保持一致)
+                    folder.file(`封面${origName}.${imageFormat}`, processedCover);
+                    console.log(`封面图处理完成: 封面${origName}.${imageFormat} (来自 ${fileName})`);
+                    successCount++;
+                  }
+                } catch (error) {
+                  console.error(`处理封面图 ${fileName} 失败:`, error);
+                  failedFiles.push(fileName);
+                  
+                  // 创建一个简单的占位图，避免顺序混乱
+                  try {
+                    // 使用原始文件名作为编号依据
+                    const origName = fileNameMapping[j] || (j + 1).toString();
+                    const placeholderCanvas = this.createPlaceholderImage(`封面${origName}加载失败`, imageFormat);
+                    const placeholderBlob = await this.canvasToBlob(placeholderCanvas, imageFormat);
+                    folder.file(`封面${origName}.${imageFormat}`, placeholderBlob);
+                    console.log(`已创建替代封面图 封面${origName}.${imageFormat} (来自 ${fileName})`);
+                  } catch (e) {
+                    console.error(`创建替代封面图 ${fileNameMapping[j] || (j+1)} 也失败:`, e);
+                  }
+                }
+              }
+              
+              console.log(`多图模式封面处理完成，成功处理 ${successCount}/${coverGroup.length} 张图片`);
+              if (failedFiles.length > 0) {
+                console.warn(`处理失败的文件: ${failedFiles.join(', ')}`);
+              }
+            }
+          }
+        } else {
+          console.log(`跳过封面图处理: ${isUsingBlackCover ? "使用默认黑色封面" : "无封面组"}`);
         }
         
         // 添加内页
@@ -199,50 +338,38 @@ export class ImageProcessor {
         
         // 如果启用了知识拼接模式，生成知识图片
         if (knowledgeMode && knowledgeCount > 0) {
-          for (let j = 0; j < knowledgeCount; j++) {
-            // 确保还有可用的知识条目
+          for (let k = 0; k < knowledgeCount; k++) {
             if (knowledgeIndex < knowledgeData.length) {
               const knowledge = knowledgeData[knowledgeIndex++];
               const knowledgeImage = await this.generateKnowledgeImage(
-                knowledge.title, 
+                knowledge.title,
                 knowledge.content,
-                processedBackgrounds[i % processedBackgrounds.length], // 使用一个背景图
                 imageFormat
               );
-              // 使用内页编号的连续性，将知识图命名为紧接着的内页编号
-              folder.file(`内页${contentPagesCount + j + 1}.${imageFormat}`, knowledgeImage);
+              folder.file(`内页${contentPagesCount + k + 1}.${imageFormat}`, knowledgeImage);
             }
           }
         }
       }
+      
+      // 生成 ZIP 文件
+      onProgress(95, '正在生成ZIP文件...');
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      
+      // 创建下载链接
+      const zipUrl = URL.createObjectURL(zipBlob);
+      
+      onProgress(100, '处理完成！');
 
-      // 生成ZIP文件
-      onProgress(95, '正在生成压缩包...');
-      // 生成当前时间字符串 (格式: YYYYMMDDHHMMSS)
-      const now = new Date();
-      const timestamp = now.getFullYear() +
-        String(now.getMonth() + 1).padStart(2, '0') +
-        String(now.getDate()).padStart(2, '0') +
-        String(now.getHours()).padStart(2, '0') +
-        String(now.getMinutes()).padStart(2, '0') +
-        String(now.getSeconds()).padStart(2, '0');
-
-      const zipContent = await zip.generateAsync({ 
-        type: 'blob',
-        compression: 'DEFLATE',
-        compressionOptions: {
-          level: 6
-        }
-      });
-
-      onProgress(100, '处理完成');
-      return { 
-        blob: zipContent, 
-        fileName: `素材包${timestamp}.zip`
+      return {
+        success: true,
+        zipUrl,
+        fileName: `processed_images_${ImageProcessor.formatDate(new Date())}.zip`
       };
     } catch (error) {
-      console.error('处理过程中出错:', error);
-      throw error;
+      console.error('Error processing images:', error);
+      onProgress(0, `处理出错: ${error.message}`);
+      return { success: false, error: error.message };
     }
   }
 
@@ -303,9 +430,42 @@ export class ImageProcessor {
   }
 
   static async processImage(coverImage, imageFormat = 'png') {
-    return new Promise((resolve) => {
+    // 确保文件有名称属性，没有则创建默认名称
+    if (!coverImage.name) {
+      const defaultName = `未命名文件_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+      console.log(`在processImage中创建默认文件名: ${defaultName}`);
+      try {
+        // 尝试直接设置属性
+        coverImage.name = defaultName;
+      } catch (e) {
+        // 如果直接设置失败，使用defineProperty
+        try {
+          Object.defineProperty(coverImage, 'name', {
+            value: defaultName,
+            writable: true,
+            enumerable: true,
+            configurable: true
+          });
+          console.log(`已成功为文件对象定义name属性: ${coverImage.name}`);
+        } catch (defineError) {
+          console.error(`无法为文件对象定义name属性:`, defineError);
+          // 如果仍然失败，我们需要创建一个新的对象包装原文件
+          coverImage = new Blob([coverImage], { type: coverImage.type || 'image/png' });
+          coverImage.name = defaultName;
+          console.log(`已创建新的Blob对象作为替代，名称: ${coverImage.name}`);
+        }
+      }
+    }
+    
+    console.log(`开始处理封面图: ${coverImage.name}, 类型: ${coverImage.type || '未知'}, 大小: ${coverImage.size}字节`);
+    return new Promise((resolve, reject) => {
       const img = new Image();
+      
       img.onload = () => {
+        // 处理完毕后释放对象URL以避免内存泄漏
+        URL.revokeObjectURL(img.src);
+        console.log(`封面图 ${coverImage.name} 已成功加载，尺寸: ${img.width}x${img.height}`);
+        
         const canvas = document.createElement('canvas');
         canvas.width = 1242;
         canvas.height = 1660;
@@ -313,13 +473,92 @@ export class ImageProcessor {
         
         // 绘制封面图片
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        console.log(`封面图 ${coverImage.name} 已绘制到画布，尺寸: ${canvas.width}x${canvas.height}`);
         
         // 转换为blob
+        try {
+          canvas.toBlob((blob) => {
+            if (blob) {
+              console.log(`封面图 ${coverImage.name} 已成功转换为Blob，大小: ${blob.size}字节`);
+              
+              // 通过添加名称属性，确保后续处理能识别该文件
+              blob.name = `${coverImage.name.split('.')[0]}_processed.${imageFormat}`;
+              
+              resolve(blob);
+            } else {
+              const error = `转换封面图 ${coverImage.name} 为Blob失败`;
+              console.error(error);
+              reject(new Error(error));
+            }
+          }, `image/${imageFormat}`, imageFormat === 'jpeg' ? 0.9 : undefined);
+        } catch (error) {
+          console.error(`处理封面图 ${coverImage.name} 时发生错误:`, error);
+          reject(error);
+        }
+      };
+      
+      img.onerror = (error) => {
+        console.error('封面图片加载失败:', error, coverImage.name);
+        // 释放对象URL
+        try {
+          if (img.src && img.src.startsWith('blob:')) {
+            URL.revokeObjectURL(img.src);
+          }
+        } catch (e) {
+          console.error('释放URL时出错:', e);
+        }
+        
+        // 创建一个空白图片作为替代，避免整个处理流程失败
+        console.log(`尝试创建替代图片用于封面 ${coverImage.name}`);
+        const canvas = document.createElement('canvas');
+        canvas.width = 1242;
+        canvas.height = 1660;
+        const ctx = canvas.getContext('2d');
+        
+        // 绘制灰色背景和错误提示
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = '#FF0000';
+        ctx.font = '30px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`无法加载图片: ${coverImage.name}`, canvas.width / 2, canvas.height / 2);
+        console.log(`已为封面 ${coverImage.name} 创建替代错误图片`);
+        
         canvas.toBlob((blob) => {
+          console.log(`替代错误图片已转换为Blob, 大小: ${blob.size}字节`);
           resolve(blob);
         }, `image/${imageFormat}`, imageFormat === 'jpeg' ? 0.9 : undefined);
       };
-      img.src = URL.createObjectURL(coverImage);
+      
+      try {
+        console.log(`开始加载封面图: ${coverImage.name}`);
+        
+        // 检查文件对象是否有效
+        if (!(coverImage instanceof Blob) && !(coverImage instanceof File)) {
+          throw new Error(`封面图对象类型无效: ${typeof coverImage}`);
+        }
+        
+        // 使用createObjectURL创建图片地址
+        const objectUrl = URL.createObjectURL(coverImage);
+        img.src = objectUrl;
+        
+        // 添加超时处理，避免图片一直处于加载状态
+        setTimeout(() => {
+          if (!img.complete) {
+            console.warn(`加载封面图 ${coverImage.name} 超时，尝试触发错误处理`);
+            img.onerror(new Error('加载超时'));
+          }
+        }, 10000); // 10秒超时
+      } catch (error) {
+        const errorMsg = `创建封面图 ${coverImage.name} 的URL失败: ${error.message}`;
+        console.error(errorMsg);
+        
+        // 直接调用错误处理程序，而不是拒绝Promise
+        setTimeout(() => {
+          img.onerror(error);
+        }, 0);
+      }
     });
   }
 
@@ -769,97 +1008,92 @@ export class ImageProcessor {
   }
   
   // 生成知识图片
-  static async generateKnowledgeImage(title, content, backgroundImage, imageFormat = 'png') {
+  static async generateKnowledgeImage(title, content, imageFormat = 'png') {
     return new Promise(async (resolve) => {
       // 创建画布
       const canvas = document.createElement('canvas');
       canvas.width = 1242;
       canvas.height = 1660;
       const ctx = canvas.getContext('2d');
-      
-      // 使用灰色背景替代背景图片
+
+      // 绘制背景
       ctx.fillStyle = '#f0f2f5';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // 绘制卡片背景
-      this.drawRoundedRect(ctx, 100, 100, canvas.width - 200, canvas.height - 200, 20, '#ffffff');
-      
-      // 添加卡片阴影（模拟）
-      ctx.save();
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
-      ctx.shadowBlur = 20;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 10;
-      this.drawRoundedRect(ctx, 100, 100, canvas.width - 200, canvas.height - 200, 20, '#ffffff');
-      ctx.restore();
-      
-      // 绘制装饰元素
+
+      // 绘制白色卡片区域（带圆角）
+      const cardX = 60;
+      const cardY = 80;
+      const cardWidth = canvas.width - 120;
+      const cardHeight = canvas.height - 160;
+      this.drawRoundedRect(ctx, cardX, cardY, cardWidth, cardHeight, 20, '#FFFFFF');
+
+      // 绘制装饰元素（四角）
+      const decorSize = 30;
+      // 左上角
       ctx.fillStyle = '#1890ff';
-      
-      // 左上角装饰
-      this.drawRoundedRect(ctx, 130, 130, 50, 5, 2, '#1890ff');
-      this.drawRoundedRect(ctx, 130, 130, 5, 50, 2, '#1890ff');
-      
-      // 右上角装饰
-      this.drawRoundedRect(ctx, canvas.width - 180, 130, 50, 5, 2, '#1890ff');
-      this.drawRoundedRect(ctx, canvas.width - 135, 130, 5, 50, 2, '#1890ff');
-      
-      // 左下角装饰
-      this.drawRoundedRect(ctx, 130, canvas.height - 135, 50, 5, 2, '#1890ff');
-      this.drawRoundedRect(ctx, 130, canvas.height - 180, 5, 50, 2, '#1890ff');
-      
-      // 右下角装饰
-      this.drawRoundedRect(ctx, canvas.width - 180, canvas.height - 135, 50, 5, 2, '#1890ff');
-      this.drawRoundedRect(ctx, canvas.width - 135, canvas.height - 180, 5, 50, 2, '#1890ff');
-      
+      ctx.fillRect(cardX + 20, cardY + 20, decorSize, 6);
+      ctx.fillRect(cardX + 20, cardY + 20, 6, decorSize);
+      // 右上角
+      ctx.fillRect(cardX + cardWidth - 20 - decorSize, cardY + 20, decorSize, 6);
+      ctx.fillRect(cardX + cardWidth - 20 - 6, cardY + 20, 6, decorSize);
+      // 左下角
+      ctx.fillRect(cardX + 20, cardY + cardHeight - 20 - 6, decorSize, 6);
+      ctx.fillRect(cardX + 20, cardY + cardHeight - 20 - decorSize, 6, decorSize);
+      // 右下角
+      ctx.fillRect(cardX + cardWidth - 20 - decorSize, cardY + cardHeight - 20 - 6, decorSize, 6);
+      ctx.fillRect(cardX + cardWidth - 20 - 6, cardY + cardHeight - 20 - decorSize, 6, decorSize);
+
       // 绘制标题
       ctx.font = 'bold 60px sans-serif';
-      ctx.fillStyle = '#333';
+      ctx.fillStyle = '#303133';
       ctx.textAlign = 'center';
       
-      // 如果标题过长，自动换行
-      const titleMaxWidth = canvas.width - 300;
-      const titleLines = this.wrapText(ctx, title, 60, titleMaxWidth);
+      // 标题文本换行
+      const titleLines = this.wrapText(ctx, title, 60, cardWidth - 100);
+      let titleY = cardY + 100;
       
-      // 绘制标题文本
-      let titleY = 250;
       titleLines.forEach(line => {
         ctx.fillText(line, canvas.width / 2, titleY);
-        titleY += 70;
+        titleY += 80;
       });
       
       // 绘制分隔线
-      ctx.fillStyle = '#1890ff';
-      this.drawRoundedRect(ctx, canvas.width / 2 - 100, titleY + 20, 200, 3, 1.5, '#1890ff');
+      const lineY = titleY + 40;
+      ctx.strokeStyle = '#1890ff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(cardX + 100, lineY);
+      ctx.lineTo(cardX + cardWidth - 100, lineY);
+      ctx.stroke();
       
       // 绘制内容
-      ctx.font = '36px sans-serif';
-      ctx.fillStyle = '#666';
+      ctx.font = '40px sans-serif';
+      ctx.fillStyle = '#606266';
       ctx.textAlign = 'left';
       
-      // 处理内容中的换行
+      // 处理内容文本，保持原始换行
       const contentParagraphs = content.split('\n');
-      let contentY = titleY + 100;
+      let contentY = lineY + 80;
       
       contentParagraphs.forEach(paragraph => {
-        // 每段内容自动换行
-        const contentMaxWidth = canvas.width - 300;
-        const contentLines = this.wrapText(ctx, paragraph, 36, contentMaxWidth);
+        if (paragraph.trim() === '') {
+          contentY += 40; // 空行给予更少的间距
+          return;
+        }
         
-        // 绘制段落文本
-        contentLines.forEach(line => {
-          ctx.fillText(line, 150, contentY);
-          contentY += 50;
+        const lines = this.wrapText(ctx, paragraph, 40, cardWidth - 120);
+        
+        lines.forEach(line => {
+          ctx.fillText(line, cardX + 60, contentY);
+          contentY += 60;
         });
         
-        // 段落间增加额外空间
-        contentY += 20;
+        contentY += 20; // 段落间距
       });
-      
-      // 转换为blob
-      canvas.toBlob((blob) => {
-        resolve(blob);
-      }, `image/${imageFormat}`, imageFormat === 'jpeg' ? 0.9 : undefined);
+
+      // 转换为Blob
+      const blob = await this.canvasToBlob(canvas, imageFormat);
+      resolve(blob);
     });
   }
 
@@ -1287,5 +1521,364 @@ export class ImageProcessor {
     }
 
     return pages;
+  }
+
+  // 组织封面图（多图模式下按文件名排序分组）
+  static async organizeCovers(coverImages, coverMode) {
+    console.log(`开始整理封面图片，模式: ${coverMode}，提供了 ${coverImages ? coverImages.length : 0} 个文件对象`);
+    
+    if (!coverImages || coverImages.length === 0) {
+      console.log('没有提供封面图片，将使用空数组');
+      return [];
+    }
+    
+    // 输出前5个文件的详细属性，用于调试
+    const filesToLog = Math.min(coverImages.length, 5);
+    for (let i = 0; i < filesToLog; i++) {
+      console.log(`文件 #${i + 1} 的属性:`);
+      const file = coverImages[i];
+      console.log(`- 名称: ${file.name || '未命名'}`);
+      console.log(`- 类型: ${file.type || '无类型'}`);
+      console.log(`- 大小: ${file.size || '未知'} 字节`);
+      console.log(`- 路径: ${file.webkitRelativePath || '无路径'}`);
+      console.log(`- 对象类型: ${file instanceof File ? 'File' : file instanceof Blob ? 'Blob' : typeof file}`);
+      
+      // 检查文件是否有数据
+      if (file.size === 0) {
+        console.warn(`警告: 文件 #${i + 1} 大小为0字节`);
+      }
+    }
+
+    try {
+      // 预处理文件，确保具有必要的属性
+      const preprocessedFiles = coverImages.map(file => {
+        // 创建文件的可变副本
+        const processedFile = file;
+        
+        // 确保文件有name属性
+        if (!processedFile.name && processedFile.webkitRelativePath) {
+          const pathParts = processedFile.webkitRelativePath.split('/');
+          const fileName = pathParts[pathParts.length - 1];
+          try {
+            Object.defineProperty(processedFile, 'name', {
+              value: fileName,
+              writable: true,
+              enumerable: true,
+              configurable: true
+            });
+            console.log(`为文件添加了name属性: ${fileName}`);
+          } catch (e) {
+            console.warn(`无法为文件添加name属性: ${e.message}`);
+          }
+        }
+        
+        // 确保文件有type属性（根据扩展名推断）
+        if (!processedFile.type && processedFile.name) {
+          const ext = processedFile.name.split('.').pop().toLowerCase();
+          let mimeType = null;
+          
+          switch (ext) {
+            case 'jpg':
+            case 'jpeg':
+              mimeType = 'image/jpeg';
+              break;
+            case 'png':
+              mimeType = 'image/png';
+              break;
+            case 'gif':
+              mimeType = 'image/gif';
+              break;
+            case 'webp':
+              mimeType = 'image/webp';
+              break;
+            case 'bmp':
+              mimeType = 'image/bmp';
+              break;
+            case 'tif':
+            case 'tiff':
+              mimeType = 'image/tiff';
+              break;
+            case 'svg':
+              mimeType = 'image/svg+xml';
+              break;
+            default:
+              if (processedFile.webkitRelativePath) {
+                // 文件夹上传的文件，默认为JPEG
+                mimeType = 'image/jpeg';
+              }
+          }
+          
+          if (mimeType) {
+            try {
+              Object.defineProperty(processedFile, 'type', {
+                value: mimeType,
+                writable: true,
+                enumerable: true,
+                configurable: true
+              });
+              console.log(`为文件 ${processedFile.name} 添加了type属性: ${mimeType}`);
+            } catch (e) {
+              console.warn(`无法为文件 ${processedFile.name} 添加type属性: ${e.message}`);
+            }
+          }
+        }
+        
+        return processedFile;
+      });
+      
+      // 过滤出有效的图片文件，在多图模式下宽松验证
+      const validImageFiles = preprocessedFiles.filter(file => {
+        // 如果是多图模式下的文件夹上传
+        if (coverMode === 'multi' && file.webkitRelativePath && file.webkitRelativePath.includes('/')) {
+          console.log(`多图模式：接受来自文件夹的文件 ${file.name || '未命名'}`);
+          return true;
+        }
+        
+        // 正常检查图片文件
+        return this.isImageFile(file);
+      });
+      
+      console.log(`过滤后的有效图片文件数量: ${validImageFiles.length}`);
+      
+      if (validImageFiles.length === 0) {
+        console.warn('过滤后没有有效的图片文件，返回空数组');
+        return [];
+      }
+
+      if (coverMode === 'single') {
+        // 单图模式: 每个图片独立一组
+        console.log('使用单图模式整理封面');
+        return validImageFiles.map(file => [file]);
+      } else {
+        // 多图模式: 尝试根据不同属性进行分组
+        console.log('使用多图模式整理封面，开始分析文件分组信息');
+        
+        // 检查是否有groupId或__metadata__
+        const hasGroupId = validImageFiles.some(file => file.groupId !== undefined);
+        const hasMetadata = validImageFiles.some(file => file.__metadata__ !== undefined);
+        const hasRelativePath = validImageFiles.some(file => 
+          file.webkitRelativePath && file.webkitRelativePath.includes('/') || 
+          file.customPath && file.customPath.includes('/')
+        );
+        
+        console.log(`存在groupId分组: ${hasGroupId}`);
+        console.log(`存在__metadata__分组: ${hasMetadata}`);
+        console.log(`存在webkitRelativePath或customPath路径: ${hasRelativePath}`);
+        
+        if (hasGroupId) {
+          // 使用groupId分组
+          const groups = {};
+          validImageFiles.forEach(file => {
+            const groupId = file.groupId || 'default';
+            if (!groups[groupId]) groups[groupId] = [];
+            groups[groupId].push(file);
+          });
+          
+          // 按照groupOrder排序组内文件
+          Object.values(groups).forEach(group => {
+            group.sort((a, b) => (a.groupOrder || 0) - (b.groupOrder || 0));
+          });
+          
+          console.log(`基于groupId创建了 ${Object.keys(groups).length} 个分组`);
+          return Object.values(groups);
+        } else if (hasMetadata) {
+          // 使用__metadata__分组
+          const groups = {};
+          validImageFiles.forEach(file => {
+            const groupId = file.__metadata__?.groupId || 'default';
+            if (!groups[groupId]) groups[groupId] = [];
+            groups[groupId].push(file);
+          });
+          
+          // 排序
+          Object.values(groups).forEach(group => {
+            group.sort((a, b) => (a.__metadata__?.order || 0) - (b.__metadata__?.order || 0));
+          });
+          
+          console.log(`基于__metadata__创建了 ${Object.keys(groups).length} 个分组`);
+          return Object.values(groups);
+        } else if (hasRelativePath) {
+          // 使用webkitRelativePath或customPath（文件夹上传）分组
+          const groups = {};
+          validImageFiles.forEach(file => {
+            let relativePath = file.customPath || file.webkitRelativePath || '';
+            let folderPath = file.folderPath || '';
+            
+            // 如果有webkitRelativePath但没有自定义folderPath，从路径中提取
+            if (!folderPath && file.webkitRelativePath) {
+              const pathParts = file.webkitRelativePath.split('/');
+              if (pathParts.length > 1) {
+                // 使用文件夹作为分组依据
+                folderPath = pathParts.slice(0, -1).join('/');
+              }
+            }
+            
+            // 如果有路径信息，使用路径作为分组键
+            if (folderPath || relativePath.includes('/')) {
+              // 确定分组键
+              const groupKey = folderPath || (relativePath.includes('/') ? 
+                              relativePath.split('/').slice(0, -1).join('/') : 'root');
+              
+              if (!groups[groupKey]) groups[groupKey] = [];
+              groups[groupKey].push(file);
+            } else {
+              // 没有路径信息的文件归入默认组
+              if (!groups['default']) groups['default'] = [];
+              groups['default'].push(file);
+            }
+          });
+          
+          // 按文件名排序组内文件
+          Object.values(groups).forEach(group => {
+            group.sort((a, b) => {
+              // 尝试提取文件名（不带扩展名）
+              const nameA = a.name.split('.')[0].trim();
+              const nameB = b.name.split('.')[0].trim();
+              
+              // 检查两个文件名是否都是纯数字
+              const isNumericA = /^\d+$/.test(nameA);
+              const isNumericB = /^\d+$/.test(nameB);
+              
+              // 如果两个都是数字，按数值大小排序
+              if (isNumericA && isNumericB) {
+                return parseInt(nameA, 10) - parseInt(nameB, 10);
+              }
+              
+              // 否则按字典序排序
+              return nameA.localeCompare(nameB);
+            });
+          });
+          
+          console.log(`基于文件夹路径创建了 ${Object.keys(groups).length} 个分组:`);
+          Object.keys(groups).forEach(key => {
+            console.log(`- 组 "${key}": ${groups[key].length}个文件`);
+          });
+          
+          return Object.values(groups);
+        } else {
+          // 没有分组信息，将所有图片作为一个组
+          console.log('没有找到分组信息，将所有图片作为一个组');
+          return [validImageFiles];
+        }
+      }
+    } catch (error) {
+      console.error('整理封面图片时出错:', error);
+      console.log('由于出错，将所有图片作为一个组返回');
+      // 出错时的安全回退：将所有有效图片作为一个组
+      const safeImages = coverImages.filter(file => this.isImageFile(file));
+      return safeImages.length > 0 ? [safeImages] : [];
+    }
+  }
+
+  static isImageFile(file) {
+    if (!file) {
+      console.error('检查到无效文件对象: 文件对象为空');
+      return false;
+    }
+    
+    // 确保文件有名称属性
+    if (!file.name) {
+      console.warn('检查到无效文件对象: 文件对象缺少名称属性');
+      
+      // 尝试从webkitRelativePath提取名称
+      if (file.webkitRelativePath) {
+        const pathParts = file.webkitRelativePath.split('/');
+        if (pathParts.length > 0) {
+          const extractedName = pathParts[pathParts.length - 1];
+          console.log(`尝试从路径提取文件名: ${extractedName}`);
+          // 动态添加name属性
+          Object.defineProperty(file, 'name', {
+            value: extractedName,
+            writable: true,
+            enumerable: true,
+            configurable: true
+          });
+          console.log(`已为文件动态添加名称: ${file.name}`);
+        }
+      }
+      
+      // 如果仍然没有名称，则创建一个默认名称
+      if (!file.name) {
+        const defaultName = `未命名文件_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        console.log(`创建默认文件名: ${defaultName}`);
+        Object.defineProperty(file, 'name', {
+          value: defaultName,
+          writable: true,
+          enumerable: true,
+          configurable: true
+        });
+      }
+    }
+    
+    console.log(`检查文件 ${file.name}:`);
+    console.log(`- 类型: ${file.type || '未知'}`);
+    console.log(`- 大小: ${file.size} 字节`);
+    console.log(`- 相对路径: ${file.webkitRelativePath || '无'}`);
+    
+    // 完全宽松的判断 - 即使没有文件类型信息，也允许处理
+    // 这是为了支持文件夹上传和某些浏览器可能没有正确设置type属性的情况
+    
+    // 如果文件有明确的图片类型，直接通过
+    if (file.type && file.type.startsWith('image/')) {
+      console.log(`文件 ${file.name} 通过MIME类型验证为图片`);
+      return true;
+    }
+    
+    // 如果有扩展名，通过扩展名判断
+    const ext = file.name.split('.').pop().toLowerCase();
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tif', 'tiff', 'heic'];
+    if (imageExtensions.includes(ext)) {
+      console.log(`文件 ${file.name} 通过扩展名验证为图片`);
+      
+      // 尝试为无类型的图片文件添加类型
+      if (!file.type) {
+        const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+        try {
+          Object.defineProperty(file, 'type', {
+            value: mimeType,
+            writable: true,
+            enumerable: true,
+            configurable: true
+          });
+          console.log(`为文件 ${file.name} 动态添加了类型: ${mimeType}`);
+        } catch (e) {
+          console.warn(`无法为文件 ${file.name} 添加类型: ${e.message}`);
+        }
+      }
+      return true;
+    }
+    
+    // 对于来自文件夹上传的文件，即使没有类型信息，也将其视为有效
+    if (file.webkitRelativePath && file.webkitRelativePath.includes('/')) {
+      console.log(`文件 ${file.name} 来自文件夹上传，被视为有效图片`);
+      return true;
+    }
+    
+    // 宽松模式 - 没有明确不是图片的证据，都允许通过
+    console.log(`文件 ${file.name} 没有明确的图片信息，但仍被放行`);
+    return true;
+  }
+
+  // 安全地格式化日期为YYYY-MM-DD格式
+  static formatDate(date) {
+    try {
+      // 检查date是否是有效的Date对象
+      if (!(date instanceof Date) || isNaN(date.getTime())) {
+        throw new Error('无效的日期对象');
+      }
+      
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    } catch (error) {
+      console.error('日期格式化错误:', error);
+      // 使用当前日期作为备用
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
   }
 } 
