@@ -4,7 +4,7 @@ import { saveAs } from 'file-saver';
 import { DBService } from './dbService';
 
 export class ImageProcessor {
-  static async processImages(coverImages, backgroundImages, excelFile, onProgress, titleConfig, imageFormat = 'png', pageMode = 'flexible', pageLimit = 0, knowledgeMode = false, knowledgeCount = 0, knowledgeExcel = null, sliceMode = false, sliceCount = 4, coverMode = 'single') {
+  static async processImages(coverImages, backgroundImages, excelFile, onProgress, titleConfig, imageFormat = 'png', pageMode = 'flexible', pageLimit = 0, knowledgeMode = false, knowledgeCount = 0, knowledgeExcel = null, sliceMode = false, sliceCount = 4, coverMode = 'single', topicMode = false) {
     console.log("===== 开始处理图片 =====");
     console.log("封面模式:", coverMode);
     console.log("封面图数量:", coverImages ? coverImages.length : 0);
@@ -13,6 +13,7 @@ export class ImageProcessor {
     console.log("页面限制:", pageLimit);
     console.log("切割模式:", sliceMode ? `启用 (${sliceCount}份)` : "禁用");
     console.log("知识拼接模式:", knowledgeMode ? `启用 (${knowledgeCount}份)` : "禁用");
+    console.log("主题模式:", topicMode ? "启用" : "禁用");
 
     // 判断是否使用的是默认黑色封面
     const isUsingBlackCover = coverImages?.[0]?.name === 'black_cover.png';
@@ -22,7 +23,17 @@ export class ImageProcessor {
       // 解析Excel文件
       onProgress(0, '正在解析表格文件...');
       const textContent = await this.parseExcel(excelFile);
-      console.log("Excel内容解析完成，共", textContent.length, "条记录");
+      
+      // 判断是否是结构化的主题数据或普通数据
+      const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
+                               typeof textContent[0] === 'object' && textContent[0].topic && 
+                               Array.isArray(textContent[0].items);
+      
+      if (isStructuredData) {
+        console.log("Excel内容解析完成，主题模式，共", textContent.length, "个主题");
+      } else {
+        console.log("Excel内容解析完成，普通模式，共", textContent.length, "条记录");
+      }
       
       // 如果启用知识拼接模式，解析知识Excel文件
       let knowledgeData = [];
@@ -114,7 +125,8 @@ export class ImageProcessor {
             backgroundCanvas, 
             textContent,
             titleConfig,
-            imageFormat
+            imageFormat,
+            topicMode
           );
         } else if (pageMode === 'cautious') {
           // 谨慎模式：每个内页使用不同的背景，只有第一页显示标题
@@ -126,22 +138,28 @@ export class ImageProcessor {
                 backgroundIndex,
                 textContent,
                 titleConfig,
-                imageFormat
+                imageFormat,
+                topicMode
               );
             } else {
+              // 非切割模式，使用原始背景图
+              console.log(`谨慎模式: 使用从索引 ${backgroundIndex} 开始的背景图`);
               contentPages = await this.generateContentPagesCautious(
                 processedBackgrounds,
                 backgroundIndex,
                 textContent,
                 titleConfig,
-                imageFormat
+                imageFormat,
+                topicMode
               );
             }
             
             // 更新背景索引
             backgroundIndex += contentPages.length;
+            console.log(`谨慎模式: 处理完成后背景索引更新为 ${backgroundIndex}`);
           } catch (error) {
             // 直接向上抛出错误
+            console.error(`谨慎模式处理失败:`, error);
             throw error;
           }
         } else {
@@ -154,22 +172,28 @@ export class ImageProcessor {
                 backgroundIndex,
                 textContent,
                 titleConfig,
-                imageFormat
+                imageFormat,
+                topicMode
               );
             } else {
+              // 非切割模式，使用原始背景图
+              console.log(`严谨模式: 使用从索引 ${backgroundIndex} 开始的背景图`);
               contentPages = await this.generateContentPagesStrict(
                 processedBackgrounds,
                 backgroundIndex,
                 textContent,
                 titleConfig,
-                imageFormat
+                imageFormat,
+                topicMode
               );
             }
             
             // 更新背景索引
             backgroundIndex += contentPages.length;
+            console.log(`严谨模式: 处理完成后背景索引更新为 ${backgroundIndex}`);
           } catch (error) {
             // 直接向上抛出错误
+            console.error(`严谨模式处理失败:`, error);
             throw error;
           }
         }
@@ -418,15 +442,58 @@ export class ImageProcessor {
       reader.onload = (e) => {
         try {
           const workbook = readXLSX(e.target.result, { type: 'array' });
-          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-          const data = [];
-          let i = 1;
-          while (firstSheet[`A${i}`]) {
-            data.push(firstSheet[`A${i}`].v);
-            i++;
+          
+          // 新的解析方式：保存主题结构的数据
+          const structuredData = [];
+          
+          // 遍历所有sheet（每个sheet作为一个主题）
+          workbook.SheetNames.forEach(sheetName => {
+            const sheet = workbook.Sheets[sheetName];
+            const items = [];
+            
+            // 读取当前sheet的A列所有内容（子项目）
+            let i = 1;
+            while (sheet[`A${i}`]) {
+              items.push(sheet[`A${i}`].v);
+              i++;
+            }
+            
+            // 只有当sheet包含内容时才添加到主题列表
+            if (items.length > 0) {
+              structuredData.push({
+                topic: sheetName, // 使用sheet名称作为主题名
+                items: items     // 子项目列表
+              });
+            }
+          });
+          
+          // 如果没有找到任何有效数据，尝试使用旧方法兼容单sheet情况
+          if (structuredData.length === 0) {
+            console.warn('未找到符合多主题结构的数据，尝试使用兼容模式');
+            const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            const items = [];
+            let i = 1;
+            while (firstSheet[`A${i}`]) {
+              items.push(firstSheet[`A${i}`].v);
+              i++;
+            }
+            
+            if (items.length > 0) {
+              structuredData.push({
+                topic: '默认主题',
+                items: items
+              });
+            }
           }
-          resolve(data);
+          
+          console.log(`Excel解析完成，共发现 ${structuredData.length} 个主题`);
+          structuredData.forEach((topic, index) => {
+            console.log(`主题${index+1} [${topic.topic}]: ${topic.items.length} 个子项目`);
+          });
+          
+          resolve(structuredData);
         } catch (error) {
+          console.error('解析Excel文件失败:', error);
           reject(error);
         }
       };
@@ -567,14 +634,56 @@ export class ImageProcessor {
     });
   }
 
-  static async generateContentPages(backgroundCanvas, textContent, titleConfig, imageFormat = 'png') {
-    // 随机打乱文字内容
-    const shuffledContent = this.shuffleArray([...textContent]);
+  static async generateContentPages(backgroundCanvas, textContent, titleConfig, imageFormat = 'png', topicMode = false) {
+    // 检查是否是结构化的主题数据
+    const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
+                             typeof textContent[0] === 'object' && textContent[0].topic && 
+                             Array.isArray(textContent[0].items);
+    
+    let processedContent;
+    
+    if (isStructuredData && topicMode) {
+      console.log("使用主题模式处理内容");
+      console.log("原始主题数据:", textContent.map(t => ({ topic: t.topic, itemCount: t.items.length })));
+      // 结构化数据处理：随机打乱主题顺序，并在每个主题内部随机打乱子项目
+      processedContent = [...textContent]; // 复制原始结构
+      
+      // 1. 随机打乱主题顺序
+      processedContent = this.shuffleArray(processedContent);
+      
+      // 2. 对每个主题内的子项目随机打乱
+      processedContent.forEach(topic => {
+        topic.items = this.shuffleArray([...topic.items]);
+      });
+      
+      console.log("主题模式内容处理完成，主题顺序和子项目顺序已随机打乱");
+      console.log("处理后主题数据:", processedContent.map(t => ({ topic: t.topic, itemCount: t.items.length })));
+    } else {
+      // 普通模式：直接随机打乱所有内容
+      if (isStructuredData) {
+        // 结构化数据，但未启用主题模式，将其扁平化处理
+        console.log("未启用主题模式，将结构化数据扁平化处理");
+        const flatContent = [];
+        textContent.forEach(topic => {
+          topic.items.forEach(item => {
+            flatContent.push(item);
+          });
+        });
+        console.log(`扁平化后共有 ${flatContent.length} 个项目`);
+        processedContent = this.shuffleArray([...flatContent]);
+      } else {
+        // 普通数组数据，直接打乱
+        console.log(`普通数组数据，共有 ${textContent.length} 个项目`);
+        processedContent = this.shuffleArray([...textContent]);
+      }
+    }
+    
     const pages = [];
     let currentPage = null;
     let lineNumber = 1;
-    let currentTextIndex = 0;
-
+    let currentTopicIndex = 0;
+    let currentItemIndex = 0;
+    
     // 创建新页面
     const createNewPage = () => {
       const canvas = document.createElement('canvas');
@@ -626,46 +735,162 @@ export class ImageProcessor {
 
     // 初始化第一页
     currentPage = createNewPage();
-
-    while (currentTextIndex < shuffledContent.length) {
-      const text = shuffledContent[currentTextIndex];
-      const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
-      
-      // 检查当前页是否还能容纳这段文字
-      const totalLinesNeeded = lines.length;
-      const willExceedLimit = currentPage.linesOnPage + totalLinesNeeded > 27;
-
-      if (willExceedLimit) {
-        pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
-        currentPage = createNewPage();
-      }
-
-      // 绘制文本
-      currentPage.ctx.font = '45px sans-serif'; // 字号改为45px
-      currentPage.ctx.fillStyle = '#FFFFFF';
-      currentPage.ctx.textAlign = 'left';
-
-      lines.forEach((line, index) => {
-        if (index === 0) {
-          currentPage.ctx.fillText(
-            `${lineNumber}. ${line}`,
-            80, // 左边距改为80px
-            currentPage.currentY
-          );
-          lineNumber++;
-        } else {
-          currentPage.ctx.fillText(
-            line,
-            80, // 左边距改为80px
-            currentPage.currentY
-          );
+    
+    // 根据处理模式处理内容
+    if (isStructuredData && topicMode) {
+      // 主题模式：按主题和子项目结构处理
+      while (currentTopicIndex < processedContent.length) {
+        const topic = processedContent[currentTopicIndex];
+        
+        // 绘制主题标题
+        currentPage.ctx.font = 'bold 55px sans-serif';
+        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.textAlign = 'left';
+        
+        // 计算绘制主题需要的空间
+        const topicText = topic.topic;
+        const topicLines = this.wrapText(currentPage.ctx, topicText, 55, 1082);
+        
+        // 检查页面剩余空间
+        const topicHeight = topicLines.length * 60 + 20; // 主题高度 + 额外间距
+        if (currentPage.currentY + topicHeight > 1650) {
+          // 当前页空间不足，创建新页
+          pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+          currentPage = createNewPage();
+          
+          // 在新页面上重新设置主题字体样式
+          currentPage.ctx.font = 'bold 55px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
         }
-        currentPage.currentY += 60; // 行间距改为60px
-        currentPage.linesOnPage++;
-      });
+        
+        // 绘制主题标题（添加emoji✅，加粗，并添加下划线）
+        topicLines.forEach((line, index) => {
+          // 绘制文本（加前缀emoji）
+          const textToDraw = index === 0 ? `✅ ${line}` : line;
+          currentPage.ctx.fillText(
+            textToDraw,
+            80,
+            currentPage.currentY
+          );
+          
+          // 绘制下划线
+          const textWidth = currentPage.ctx.measureText(textToDraw).width;
+          const underlineY = currentPage.currentY + 5; // 下划线位置在文本下方5px
+          currentPage.ctx.beginPath();
+          currentPage.ctx.moveTo(80, underlineY);
+          currentPage.ctx.lineTo(80 + textWidth, underlineY);
+          currentPage.ctx.lineWidth = 2;
+          currentPage.ctx.strokeStyle = '#FFFFFF';
+          currentPage.ctx.stroke();
+          
+          currentPage.currentY += 60;
+          currentPage.linesOnPage++;
+        });
+        
+        // 主题标题后增加间距
+        currentPage.currentY += 20;
+        
+        // 处理该主题下的所有子项目
+        currentItemIndex = 0;
+        while (currentItemIndex < topic.items.length) {
+          const text = topic.items[currentItemIndex];
+          
+          // 正常字体绘制子项目
+          currentPage.ctx.font = '45px sans-serif';
+          
+          const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+          
+          // 检查当前页是否还能容纳这段文字
+          const totalLinesNeeded = lines.length;
+          const willExceedLimit = currentPage.currentY + (totalLinesNeeded * 60) + 10 > 1650;
 
-      currentPage.currentY += 10; // 段落间距保持不变
-      currentTextIndex++;
+          if (willExceedLimit) {
+            pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+            currentPage = createNewPage();
+            
+            // 重要：确保新页面上使用子项目的正确字体样式
+            currentPage.ctx.font = '45px sans-serif';
+            currentPage.ctx.fillStyle = '#FFFFFF';
+            currentPage.ctx.textAlign = 'left';
+          }
+
+          // 绘制子项目文本
+          lines.forEach((line, index) => {
+            if (index === 0) {
+              currentPage.ctx.fillText(
+                `${lineNumber}. ${line}`,
+                80,
+                currentPage.currentY
+              );
+              lineNumber++;
+            } else {
+              currentPage.ctx.fillText(
+                line,
+                80,
+                currentPage.currentY
+              );
+            }
+            currentPage.currentY += 60;
+            currentPage.linesOnPage++;
+          });
+
+          currentPage.currentY += 10; // 段落间距
+          currentItemIndex++;
+        }
+        
+        // 主题之间增加额外间距
+        currentPage.currentY += 30;
+        currentTopicIndex++;
+      }
+    } else {
+      // 普通模式：处理扁平化的内容
+      let currentTextIndex = 0;
+      while (currentTextIndex < processedContent.length) {
+        const text = processedContent[currentTextIndex];
+        const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+        
+        // 检查当前页是否还能容纳这段文字
+        const totalLinesNeeded = lines.length;
+        const willExceedLimit = currentPage.linesOnPage + totalLinesNeeded > 27;
+
+        if (willExceedLimit) {
+          pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+          currentPage = createNewPage();
+          
+          // 重要：确保新页面上使用子项目的正确字体样式
+          currentPage.ctx.font = '45px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+        }
+
+        // 绘制文本
+        currentPage.ctx.font = '45px sans-serif';
+        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.textAlign = 'left';
+
+        lines.forEach((line, index) => {
+          if (index === 0) {
+            currentPage.ctx.fillText(
+              `${lineNumber}. ${line}`,
+              80,
+              currentPage.currentY
+            );
+            lineNumber++;
+          } else {
+            currentPage.ctx.fillText(
+              line,
+              80,
+              currentPage.currentY
+            );
+          }
+          currentPage.currentY += 60;
+          currentPage.linesOnPage++;
+        });
+
+        currentPage.currentY += 10; // 段落间距
+        currentTextIndex++;
+      }
     }
 
     // 添加最后一页
@@ -677,27 +902,83 @@ export class ImageProcessor {
   }
 
   static wrapText(ctx, text, fontSize, maxWidth) {
-    ctx.font = `${fontSize}px sans-serif`; // 设置正确的字体大小
-    const words = text.split('');
+    ctx.font = `${fontSize}px sans-serif`;
+    
+    // 先尝试简单测量，看是否整个文本能直接显示在一行
+    const metrics = ctx.measureText(text);
+    if (metrics.width <= maxWidth) {
+      return [text]; // 如果整个文本适合一行，直接返回
+    }
+    
+    // 简化标点符号列表，只使用ASCII字符
+    const noLeadingPunctuation = [
+      ',', '.', '!', '?', ';', ':', ')', ']', '}', '"', "'"
+    ];
+    
+    const noTrailingPunctuation = [
+      '(', '[', '{', '"', "'"
+    ];
+    
+    const chars = text.split('');
     const lines = [];
     let currentLine = '';
-
-    for (const char of words) {
-      const testLine = currentLine + char;
-      const metrics = ctx.measureText(testLine);
+    
+    for (let i = 0; i < chars.length; i++) {
+      const char = chars[i];
+      const nextChar = i < chars.length - 1 ? chars[i + 1] : null;
       
-      if (metrics.width > maxWidth) {
-        lines.push(currentLine);
-        currentLine = char;
+      // 测试添加当前字符后的宽度
+      const testLine = currentLine + char;
+      const testMetrics = ctx.measureText(testLine);
+      
+      // 如果当前字符是不应该在行尾的标点，并且下一个字符存在
+      if (noTrailingPunctuation.includes(char) && nextChar) {
+        // 测试添加当前字符和下一个字符后的宽度
+        const testWithNextChar = testLine + nextChar;
+        const nextMetrics = ctx.measureText(testWithNextChar);
+        
+        // 如果加上下一个字符也不会超出宽度，尝试将下一个字符也加入
+        if (nextMetrics.width <= maxWidth) {
+          currentLine = testLine;
+          continue;
+        }
+      }
+      
+      // 如果下一个字符是不应该在行首的标点
+      if (nextChar && noLeadingPunctuation.includes(nextChar)) {
+        // 测试添加当前字符和下一个字符后的宽度
+        const testWithNextChar = testLine + nextChar;
+        const nextMetrics = ctx.measureText(testWithNextChar);
+        
+        // 如果加上下一个字符不会超出宽度太多，尝试将下一个字符也加入
+        if (nextMetrics.width <= maxWidth * 1.05) { // 允许宽度有5%的宽容度
+          currentLine = testLine;
+          continue;
+        }
+      }
+      
+      // 如果添加当前字符后会超出宽度
+      if (testMetrics.width > maxWidth) {
+        // 如果当前行非空，则换行
+        if (currentLine) {
+          lines.push(currentLine);
+          currentLine = char;
+        } else {
+          // 如果当前行为空，说明单个字符就超出了最大宽度
+          lines.push(char);
+          currentLine = '';
+        }
       } else {
+        // 如果不超出宽度，直接添加字符
         currentLine = testLine;
       }
     }
     
+    // 处理最后一行
     if (currentLine) {
       lines.push(currentLine);
     }
-
+    
     return lines;
   }
 
@@ -718,14 +999,58 @@ export class ImageProcessor {
   }
 
   // 严谨模式：生成内页，每页使用不同的背景图
-  static async generateContentPagesStrict(backgroundImages, startIndex, textContent, titleConfig, imageFormat = 'png') {
-    // 随机打乱文字内容
-    const shuffledContent = this.shuffleArray([...textContent]);
+  static async generateContentPagesStrict(backgroundImages, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false) {
+    // 检查是否是结构化的主题数据
+    const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
+                             typeof textContent[0] === 'object' && textContent[0].topic && 
+                             Array.isArray(textContent[0].items);
+    
+    let processedContent;
+    
+    if (isStructuredData && topicMode) {
+      console.log("严谨模式: 使用主题模式处理内容");
+      console.log("严谨模式-原始主题数据:", textContent.map(t => ({ topic: t.topic, itemCount: t.items.length })));
+      // 结构化数据处理：随机打乱主题顺序，并在每个主题内部随机打乱子项目
+      processedContent = [...textContent]; // 复制原始结构
+      
+      // 1. 随机打乱主题顺序
+      processedContent = this.shuffleArray(processedContent);
+      
+      // 2. 对每个主题内的子项目随机打乱
+      processedContent.forEach(topic => {
+        topic.items = this.shuffleArray([...topic.items]);
+      });
+      
+      console.log("严谨模式-主题处理完成，主题顺序和子项目顺序已随机打乱");
+      console.log("严谨模式-处理后主题数据:", processedContent.map(t => ({ topic: t.topic, itemCount: t.items.length })));
+    } else {
+      // 普通模式：直接随机打乱所有内容
+      if (isStructuredData) {
+        // 结构化数据，但未启用主题模式，将其扁平化处理
+        console.log("严谨模式-未启用主题模式，将结构化数据扁平化处理");
+        const flatContent = [];
+        textContent.forEach(topic => {
+          topic.items.forEach(item => {
+            flatContent.push(item);
+          });
+        });
+        console.log(`严谨模式-扁平化后共有 ${flatContent.length} 个项目`);
+        processedContent = this.shuffleArray([...flatContent]);
+      } else {
+        // 普通数组数据，直接打乱
+        console.log(`严谨模式-普通数组数据，共有 ${textContent.length} 个项目`);
+        processedContent = this.shuffleArray([...textContent]);
+      }
+    }
+    
     const pages = [];
     let currentPage = null;
     let lineNumber = 1;
-    let currentTextIndex = 0;
+    let currentTopicIndex = 0;
+    let currentItemIndex = 0;
     let currentBackgroundIndex = startIndex;
+    let currentTextIndex = 0; // 添加缺失的文本索引变量
+    let shuffledContent = processedContent; // 确保正确初始化shuffledContent变量
 
     // 创建新页面
     const createNewPage = async () => {
@@ -737,6 +1062,7 @@ export class ImageProcessor {
       // 获取当前背景图并处理
       const backgroundCanvas = await this.processBackgroundImage(backgroundImages[currentBackgroundIndex]);
       currentBackgroundIndex++;
+      console.log(`严谨模式-创建新页面，使用背景图索引: ${currentBackgroundIndex-1}`);
 
       const canvas = document.createElement('canvas');
       canvas.width = 1242;
@@ -788,66 +1114,235 @@ export class ImageProcessor {
     // 初始化第一页
     currentPage = await createNewPage();
 
-    while (currentTextIndex < shuffledContent.length) {
-      const text = shuffledContent[currentTextIndex];
-      const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
-      
-      // 检查当前页是否还能容纳这段文字
-      const totalLinesNeeded = lines.length;
-      const willExceedLimit = currentPage.linesOnPage + totalLinesNeeded > 27;
-
-      if (willExceedLimit) {
-        pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
-        currentPage = await createNewPage();
-      }
-
-      // 绘制文本
-      currentPage.ctx.font = '45px sans-serif'; // 字号改为45px
-      currentPage.ctx.fillStyle = '#FFFFFF';
-      currentPage.ctx.textAlign = 'left';
-
-      lines.forEach((line, index) => {
-        if (index === 0) {
-          currentPage.ctx.fillText(
-            `${lineNumber}. ${line}`,
-            80, // 左边距改为80px
-            currentPage.currentY
-          );
-          lineNumber++;
-        } else {
-          currentPage.ctx.fillText(
-            line,
-            80, // 左边距改为80px
-            currentPage.currentY
-          );
+    if (isStructuredData && topicMode) {
+      // 主题模式处理
+      console.log("严谨模式-使用主题模式处理内容进行绘制");
+      while (currentTopicIndex < processedContent.length) {
+        const topic = processedContent[currentTopicIndex];
+        console.log(`严谨模式-处理主题 ${currentTopicIndex + 1}/${processedContent.length}: ${topic.topic}`);
+        
+        // 绘制主题标题
+        currentPage.ctx.font = 'bold 55px sans-serif';
+        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.textAlign = 'left';
+        
+        // 计算绘制主题需要的空间
+        const topicText = topic.topic;
+        const topicLines = this.wrapText(currentPage.ctx, topicText, 55, 1082);
+        
+        // 检查页面剩余空间
+        const topicHeight = topicLines.length * 60 + 20; // 主题高度 + 额外间距
+        if (currentPage.currentY + topicHeight > 1650) {
+          // 当前页空间不足，创建新页
+          console.log(`严谨模式-当前页面无法容纳主题标题，创建新页面`);
+          pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+          currentPage = await createNewPage();
+          
+          // 在新页面上重新设置主题字体样式
+          currentPage.ctx.font = 'bold 55px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
         }
-        currentPage.currentY += 60; // 行间距改为60px
-        currentPage.linesOnPage++;
-      });
+        
+        // 绘制主题标题（添加emoji✅，加粗，并添加下划线）
+        topicLines.forEach((line, index) => {
+          // 绘制文本（加前缀emoji）
+          const textToDraw = index === 0 ? `✅ ${line}` : line;
+          currentPage.ctx.fillText(
+            textToDraw,
+            80,
+            currentPage.currentY
+          );
+          
+          // 绘制下划线
+          const textWidth = currentPage.ctx.measureText(textToDraw).width;
+          const underlineY = currentPage.currentY + 5; // 下划线位置在文本下方5px
+          currentPage.ctx.beginPath();
+          currentPage.ctx.moveTo(80, underlineY);
+          currentPage.ctx.lineTo(80 + textWidth, underlineY);
+          currentPage.ctx.lineWidth = 2;
+          currentPage.ctx.strokeStyle = '#FFFFFF';
+          currentPage.ctx.stroke();
+          
+          currentPage.currentY += 60;
+          currentPage.linesOnPage++;
+        });
+        
+        // 主题标题后增加间距
+        currentPage.currentY += 20;
+        
+        // 处理该主题下的所有子项目
+        currentItemIndex = 0;
+        let isProcessingItems = true; // 标记是否正在处理子项目
+        
+        while (currentItemIndex < topic.items.length) {
+          const text = topic.items[currentItemIndex];
+          console.log(`严谨模式-处理主题 "${topic.topic}" 中的项目 ${currentItemIndex + 1}/${topic.items.length}: ${text.slice(0, 20)}...`);
+          
+          // 正常字体绘制子项目
+          currentPage.ctx.font = '45px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+          
+          const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+          console.log(`严谨模式-文本被分割为 ${lines.length} 行`);
+          
+          // 检查当前页是否还能容纳这段文字
+          const totalLinesNeeded = lines.length;
+          const willExceedLimit = currentPage.currentY + (totalLinesNeeded * 60) + 10 > 1650;
 
-      currentPage.currentY += 10; // 段落间距保持不变
-      currentTextIndex++;
+          if (willExceedLimit) {
+            console.log(`严谨模式-当前页面已满，创建新页面`);
+            pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+            currentPage = await createNewPage();
+            
+            // 确保新页面上使用子项目的字体样式，而不是主题样式
+            currentPage.ctx.font = '45px sans-serif';
+            currentPage.ctx.fillStyle = '#FFFFFF';
+            currentPage.ctx.textAlign = 'left';
+          }
+
+          // 绘制子项目文本
+          lines.forEach((line, index) => {
+            if (index === 0) {
+              currentPage.ctx.fillText(
+                `${lineNumber}. ${line}`,
+                80,
+                currentPage.currentY
+              );
+              lineNumber++;
+            } else {
+              currentPage.ctx.fillText(
+                line,
+                80,
+                currentPage.currentY
+              );
+            }
+            currentPage.currentY += 60;
+            currentPage.linesOnPage++;
+          });
+
+          currentPage.currentY += 10; // 段落间距
+          currentItemIndex++;
+        }
+        
+        // 主题之间增加额外间距
+        currentPage.currentY += 30;
+        currentTopicIndex++;
+      }
+    } else {
+      // 普通模式：处理扁平化的内容
+      console.log(`严谨模式-使用普通模式处理内容进行绘制，共 ${shuffledContent.length} 个项目`);
+      while (currentTextIndex < shuffledContent.length) {
+        const text = shuffledContent[currentTextIndex];
+        console.log(`严谨模式-处理文本索引 ${currentTextIndex}, 内容: ${text.slice(0, 20)}...`);
+        const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+        console.log(`严谨模式-文本被分割为 ${lines.length} 行`);
+        
+        // 检查当前页是否还能容纳这段文字
+        const totalLinesNeeded = lines.length;
+        const willExceedLimit = currentPage.linesOnPage + totalLinesNeeded > 27;
+
+        if (willExceedLimit) {
+          console.log(`严谨模式-当前页面已满，当前行数: ${currentPage.linesOnPage}，需要行数: ${totalLinesNeeded}，创建新页面`);
+          pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+          currentPage = await createNewPage();
+        }
+
+        // 绘制文本
+        currentPage.ctx.font = '45px sans-serif'; // 字号改为45px
+        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.textAlign = 'left';
+
+        lines.forEach((line, index) => {
+          if (index === 0) {
+            currentPage.ctx.fillText(
+              `${lineNumber}. ${line}`,
+              80, // 左边距改为80px
+              currentPage.currentY
+            );
+            lineNumber++;
+          } else {
+            currentPage.ctx.fillText(
+              line,
+              80, // 左边距改为80px
+              currentPage.currentY
+            );
+          }
+          currentPage.currentY += 60; // 行间距改为60px
+          currentPage.linesOnPage++;
+        });
+
+        currentPage.currentY += 10; // 段落间距保持不变
+        currentTextIndex++;
+      }
     }
 
     // 添加最后一页
     if (currentPage && currentPage.linesOnPage > 0) {
+      console.log(`严谨模式-添加最后一页，行数: ${currentPage.linesOnPage}`);
       pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
     }
 
+    console.log(`严谨模式-内页生成完成，共 ${pages.length} 页`);
     return pages;
   }
 
-  // 添加新的谨慎模式：基于严谨模式，但只有第一页显示标题
-  static async generateContentPagesCautious(backgroundImages, startIndex, textContent, titleConfig, imageFormat = 'png') {
-    // 随机打乱文字内容
-    const shuffledContent = this.shuffleArray([...textContent]);
+  // 添加新的谨慎模式函数（切割模式）：基于严谨模式，但只有第一页显示标题
+  static async generateContentPagesCautious(backgroundImages, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false) {
+    // 检查是否是结构化的主题数据
+    const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
+                             typeof textContent[0] === 'object' && textContent[0].topic && 
+                             Array.isArray(textContent[0].items);
+    
+    let processedContent;
+    let currentProcessingState = 'none'; // 'none', 'topic', 'item' - 标记当前处理的是主题还是子项目
+    
+    if (isStructuredData && topicMode) {
+      console.log("谨慎模式: 使用主题模式处理内容");
+      console.log("谨慎模式-原始主题数据:", textContent.map(t => ({ topic: t.topic, itemCount: t.items.length })));
+      // 结构化数据处理：随机打乱主题顺序，并在每个主题内部随机打乱子项目
+      processedContent = [...textContent]; // 复制原始结构
+      
+      // 1. 随机打乱主题顺序
+      processedContent = this.shuffleArray(processedContent);
+      
+      // 2. 对每个主题内的子项目随机打乱
+      processedContent.forEach(topic => {
+        topic.items = this.shuffleArray([...topic.items]);
+      });
+      
+      console.log("谨慎模式-主题处理完成，主题顺序和子项目顺序已随机打乱");
+      console.log("谨慎模式-处理后主题数据:", processedContent.map(t => ({ topic: t.topic, itemCount: t.items.length })));
+    } else {
+      // 普通模式：直接随机打乱所有内容
+      if (isStructuredData) {
+        // 结构化数据，但未启用主题模式，将其扁平化处理
+        console.log("谨慎模式-未启用主题模式，将结构化数据扁平化处理");
+        const flatContent = [];
+        textContent.forEach(topic => {
+          topic.items.forEach(item => {
+            flatContent.push(item);
+          });
+        });
+        console.log(`谨慎模式-扁平化后共有 ${flatContent.length} 个项目`);
+        processedContent = this.shuffleArray([...flatContent]);
+      } else {
+        // 普通数组数据，直接打乱
+        console.log(`谨慎模式-普通数组数据，共有 ${textContent.length} 个项目`);
+        processedContent = this.shuffleArray([...textContent]);
+      }
+    }
+    
     const pages = [];
     let currentPage = null;
     let lineNumber = 1;
     let currentTextIndex = 0;
+    let currentTopicIndex = 0; // 添加主题索引变量
+    let currentItemIndex = 0;  // 添加项目索引变量
     let currentBackgroundIndex = startIndex;
     let isFirstPage = true;
-
+    
     // 计算文本会占用的高度
     const calculateTextHeight = (ctx, text, fontSize, maxWidth) => {
       const lines = this.wrapText(ctx, text, fontSize, maxWidth);
@@ -865,6 +1360,7 @@ export class ImageProcessor {
       // 获取当前背景图并处理
       const backgroundCanvas = await this.processBackgroundImage(backgroundImages[currentBackgroundIndex]);
       currentBackgroundIndex++;
+      console.log(`谨慎模式-创建新页面，使用背景图索引: ${currentBackgroundIndex-1}, 是否为首页: ${isFirstPage}, 当前处理状态: ${currentProcessingState}`);
 
       const canvas = document.createElement('canvas');
       canvas.width = 1242;
@@ -917,6 +1413,20 @@ export class ImageProcessor {
       } else {
         // 非第一页，不显示标题
         const topMargin = 80; // 保持与第一页相同的上边距
+        
+        // 根据当前处理状态设置正确的字体样式
+        if (currentProcessingState === 'topic') {
+          ctx.font = 'bold 55px sans-serif';
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textAlign = 'left';
+          console.log(`谨慎模式-新页面设置主题样式`);
+        } else if (currentProcessingState === 'item') {
+          ctx.font = '45px sans-serif';
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textAlign = 'left';
+          console.log(`谨慎模式-新页面设置子项目样式`);
+        }
+        
         return {
           canvas,
           ctx,
@@ -930,57 +1440,204 @@ export class ImageProcessor {
     // 初始化第一页
     currentPage = await createNewPage();
 
-    while (currentTextIndex < shuffledContent.length) {
-      const text = shuffledContent[currentTextIndex];
-      const testCtx = currentPage.ctx;
-      // 计算当前文本需要的高度
-      const textHeight = calculateTextHeight(testCtx, text, 45, 1082);
+    // 根据处理模式处理内容
+    if (isStructuredData && topicMode) {
+      // 主题模式处理
+      console.log("谨慎模式-使用主题模式处理内容进行绘制");
       
-      // 计算当前页面的可用空间
-      const availableHeight = 1660 - 80 - (currentPage.currentY - currentPage.contentStartY);
-      
-      // 判断是否可以完整显示当前文本
-      if (currentPage.currentY + textHeight > 1650) { // 将底部边距从1600减少到仅10像素(1660-10)
-        // 当前页不够放下这个文本，创建新页
-        pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
-        isFirstPage = false;
-        currentPage = await createNewPage();
-      }
-      
-      // 绘制文本
-      const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
-      currentPage.ctx.font = '45px sans-serif';
-      currentPage.ctx.fillStyle = '#FFFFFF';
-      currentPage.ctx.textAlign = 'left';
-
-      lines.forEach((line, index) => {
-        if (index === 0) {
-          currentPage.ctx.fillText(
-            `${lineNumber}. ${line}`,
-            80,
-            currentPage.currentY
-          );
-          lineNumber++;
-        } else {
-          currentPage.ctx.fillText(
-            line,
-            80,
-            currentPage.currentY
-          );
+      while (currentTopicIndex < processedContent.length) {
+        const topic = processedContent[currentTopicIndex];
+        console.log(`谨慎模式-处理主题 ${currentTopicIndex + 1}/${processedContent.length}: ${topic.topic}`);
+        
+        // 设置当前处理状态为主题
+        currentProcessingState = 'topic';
+        
+        // 绘制主题标题
+        currentPage.ctx.font = 'bold 55px sans-serif';
+        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.textAlign = 'left';
+        
+        // 计算绘制主题需要的空间
+        const topicText = topic.topic;
+        const topicLines = this.wrapText(currentPage.ctx, topicText, 55, 1082);
+        console.log(`谨慎模式-主题标题分为 ${topicLines.length} 行`);
+        
+        // 检查页面剩余空间
+        const topicHeight = topicLines.length * 60 + 20; // 主题高度 + 额外间距
+        if (currentPage.currentY + topicHeight > 1650) {
+          // 当前页空间不足，创建新页
+          console.log(`谨慎模式-当前页面无法容纳主题标题，创建新页面`);
+          pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+          isFirstPage = false;
+          currentPage = await createNewPage();
+          
+          // 在新页面上重新设置主题字体样式
+          currentPage.ctx.font = 'bold 55px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
         }
-        currentPage.currentY += 60;
-        currentPage.linesOnPage++;
-      });
+        
+        // 绘制主题标题（添加emoji✅，加粗，并添加下划线）
+        topicLines.forEach((line, index) => {
+          // 绘制文本（加前缀emoji）
+          const textToDraw = index === 0 ? `✅ ${line}` : line;
+          currentPage.ctx.fillText(
+            textToDraw,
+            80,
+            currentPage.currentY
+          );
+          
+          // 绘制下划线
+          const textWidth = currentPage.ctx.measureText(textToDraw).width;
+          const underlineY = currentPage.currentY + 5; // 下划线位置在文本下方5px
+          currentPage.ctx.beginPath();
+          currentPage.ctx.moveTo(80, underlineY);
+          currentPage.ctx.lineTo(80 + textWidth, underlineY);
+          currentPage.ctx.lineWidth = 2;
+          currentPage.ctx.strokeStyle = '#FFFFFF';
+          currentPage.ctx.stroke();
+          
+          currentPage.currentY += 60;
+          currentPage.linesOnPage++;
+        });
+        
+        // 主题标题后增加间距
+        currentPage.currentY += 20;
+        
+        // 处理该主题下的所有子项目
+        currentItemIndex = 0;
+        
+        // 设置当前处理状态为子项目
+        currentProcessingState = 'item';
+        
+        while (currentItemIndex < topic.items.length) {
+          const text = topic.items[currentItemIndex];
+          console.log(`谨慎模式-处理主题 "${topic.topic}" 中的项目 ${currentItemIndex + 1}/${topic.items.length}: ${text.slice(0, 20)}...`);
+          
+          // 每次处理子项目前设置正确样式
+          currentPage.ctx.font = '45px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+          
+          const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+          console.log(`谨慎模式-子项目文本被分割为 ${lines.length} 行`);
+          
+          // 检查当前页是否还能容纳这段文字
+          const totalLinesNeeded = lines.length;
+          const willExceedLimit = currentPage.currentY + (totalLinesNeeded * 60) + 10 > 1650;
 
-      currentPage.currentY += 10; // 段落间距
-      currentTextIndex++;
+          if (willExceedLimit) {
+            console.log(`谨慎模式-当前页面已满，创建新页面 (处理子项目中)`);
+            pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+            isFirstPage = false;
+            currentPage = await createNewPage();
+            
+            // 确保新页面上使用子项目的字体样式
+            currentPage.ctx.font = '45px sans-serif';
+            currentPage.ctx.fillStyle = '#FFFFFF';
+            currentPage.ctx.textAlign = 'left';
+          }
+
+          // 绘制子项目文本
+          lines.forEach((line, index) => {
+            if (index === 0) {
+              currentPage.ctx.fillText(
+                `${lineNumber}. ${line}`,
+                80,
+                currentPage.currentY
+              );
+              lineNumber++;
+            } else {
+              currentPage.ctx.fillText(
+                line,
+                80,
+                currentPage.currentY
+              );
+            }
+            currentPage.currentY += 60;
+            currentPage.linesOnPage++;
+          });
+
+          currentPage.currentY += 10; // 段落间距
+          currentItemIndex++;
+        }
+        
+        // 主题之间增加额外间距
+        currentPage.currentY += 30;
+        currentTopicIndex++;
+      }
+    } else {
+      // 普通模式：处理扁平化的内容
+      currentProcessingState = 'none';
+      console.log(`谨慎模式-使用普通模式处理内容进行绘制，共 ${processedContent.length} 个项目`);
+      
+      // 计算文本会占用的高度
+      const calculateTextHeight = (ctx, text, fontSize, maxWidth) => {
+        const lines = this.wrapText(ctx, text, fontSize, maxWidth);
+        // 每行高度为60px，段落间距10px
+        return lines.length * 60 + 10; 
+      };
+      
+      while (currentTextIndex < processedContent.length) {
+        const text = processedContent[currentTextIndex];
+        console.log(`谨慎模式-处理文本索引 ${currentTextIndex}, 内容: ${text.slice(0, 20)}...`);
+        
+        // 确保使用正确的字体样式
+        currentPage.ctx.font = '45px sans-serif';
+        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.textAlign = 'left';
+        
+        // 计算当前文本需要的高度
+        const textHeight = calculateTextHeight(currentPage.ctx, text, 45, 1082);
+        
+        // 判断是否可以完整显示当前文本
+        if (currentPage.currentY + textHeight > 1650) {
+          console.log(`谨慎模式-当前页面不足以容纳文本，当前Y: ${currentPage.currentY}，需要高度: ${textHeight}，创建新页面`);
+          pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+          isFirstPage = false;
+          currentPage = await createNewPage();
+          
+          // 确保新页面上使用正确的字体样式
+          currentPage.ctx.font = '45px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+        }
+        
+        // 绘制文本
+        const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+        console.log(`谨慎模式-文本被分割为 ${lines.length} 行`);
+
+        lines.forEach((line, index) => {
+          if (index === 0) {
+            currentPage.ctx.fillText(
+              `${lineNumber}. ${line}`,
+              80,
+              currentPage.currentY
+            );
+            lineNumber++;
+          } else {
+            currentPage.ctx.fillText(
+              line,
+              80,
+              currentPage.currentY
+            );
+          }
+          currentPage.currentY += 60;
+          currentPage.linesOnPage++;
+        });
+
+        currentPage.currentY += 10; // 段落间距
+        currentTextIndex++;
+      }
     }
 
     // 添加最后一页
     if (currentPage && currentPage.linesOnPage > 0) {
+      console.log(`谨慎模式-添加最后一页，行数: ${currentPage.linesOnPage}`);
       pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
     }
 
+    console.log(`谨慎模式-内页生成完成，共 ${pages.length} 页`);
     return pages;
   }
 
@@ -1382,23 +2039,60 @@ export class ImageProcessor {
   }
 
   // 添加新的谨慎模式函数（切割模式）：基于严谨模式，但只有第一页显示标题
-  static async generateContentPagesCautiousWithProcessedBackgrounds(processedBackgrounds, startIndex, textContent, titleConfig, imageFormat = 'png') {
+  static async generateContentPagesCautiousWithProcessedBackgrounds(processedBackgrounds, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false) {
+    // 基于谨慎模式的切片背景版本实现
+    // 确保在主题模式下跨页时能正确保持字体样式
+    const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
+                             typeof textContent[0] === 'object' && textContent[0].topic && 
+                             Array.isArray(textContent[0].items);
+    
+    let processedContent;
+    let processingSubItems = false; // 标记是否正在处理子项目
+    let currentTopicIndex = 0;
+    let inTopicProcessing = false; // 标记是否正在处理某个主题的内容
+    let currentProcessingState = 'none'; // 'none', 'topic', 'item' - 标记当前处理的是主题还是子项目
+    
     // 随机打乱文字内容
-    const shuffledContent = this.shuffleArray([...textContent]);
+    if (isStructuredData && topicMode) {
+      console.log("谨慎模式(切片背景): 使用主题模式处理内容");
+      // 结构化数据处理：随机打乱主题顺序，并在每个主题内部随机打乱子项目
+      processedContent = [...textContent]; // 复制原始结构
+      
+      // 1. 随机打乱主题顺序
+      processedContent = this.shuffleArray(processedContent);
+      
+      // 2. 对每个主题内的子项目随机打乱
+      processedContent.forEach(topic => {
+        topic.items = this.shuffleArray([...topic.items]);
+      });
+      
+      console.log("谨慎模式(切片背景): 主题处理完成，主题顺序和子项目顺序已随机打乱");
+    } else {
+      // 普通模式：直接随机打乱所有内容
+      if (isStructuredData) {
+        // 结构化数据，但未启用主题模式，将其扁平化处理
+        console.log("谨慎模式(切片背景): 未启用主题模式，将结构化数据扁平化处理");
+        const flatContent = [];
+        textContent.forEach(topic => {
+          topic.items.forEach(item => {
+            flatContent.push(item);
+          });
+        });
+        processedContent = this.shuffleArray([...flatContent]);
+      } else {
+        // 普通数组数据，直接打乱
+        processedContent = this.shuffleArray([...textContent]);
+      }
+    }
+    
     const pages = [];
     let currentPage = null;
     let lineNumber = 1;
     let currentTextIndex = 0;
+    let currentItemIndex = 0;
     let currentBackgroundIndex = startIndex;
     let isFirstPage = true;
-
-    // 计算文本会占用的高度
-    const calculateTextHeight = (ctx, text, fontSize, maxWidth) => {
-      const lines = this.wrapText(ctx, text, fontSize, maxWidth);
-      // 每行高度为60px，段落间距10px
-      return lines.length * 60 + 10; 
-    };
-
+    
     // 创建新页面
     const createNewPage = async () => {
       // 检查是否还有足够的背景图
@@ -1409,6 +2103,7 @@ export class ImageProcessor {
       // 获取当前背景Canvas
       const backgroundCanvas = processedBackgrounds[currentBackgroundIndex];
       currentBackgroundIndex++;
+      console.log(`谨慎模式(切片背景)-创建新页面，使用背景索引: ${currentBackgroundIndex-1}, 是否为首页: ${isFirstPage}`);
 
       const canvas = document.createElement('canvas');
       canvas.width = 1242;
@@ -1461,6 +2156,25 @@ export class ImageProcessor {
       } else {
         // 非第一页，不显示标题
         const topMargin = 80; // 保持与第一页相同的上边距
+        
+        // 根据当前处理状态设置正确的字体样式
+        if (inTopicProcessing && !processingSubItems) {
+          ctx.font = 'bold 55px sans-serif';
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textAlign = 'left';
+          console.log(`谨慎模式(切片背景)-新页面设置主题样式`);
+        } else if (processingSubItems) {
+          ctx.font = '45px sans-serif';
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textAlign = 'left';
+          console.log(`谨慎模式(切片背景)-新页面设置子项目样式`);
+        } else {
+          // 默认文本样式
+          ctx.font = '45px sans-serif';
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textAlign = 'left';
+        }
+        
         return {
           canvas,
           ctx,
@@ -1470,61 +2184,208 @@ export class ImageProcessor {
         };
       }
     };
-
+    
     // 初始化第一页
     currentPage = await createNewPage();
 
-    while (currentTextIndex < shuffledContent.length) {
-      const text = shuffledContent[currentTextIndex];
-      const testCtx = currentPage.ctx;
-      // 计算当前文本需要的高度
-      const textHeight = calculateTextHeight(testCtx, text, 45, 1082);
+    // 根据处理模式处理内容
+    if (isStructuredData && topicMode) {
+      // 主题模式处理
+      console.log("谨慎模式(切片背景)-使用主题模式处理内容进行绘制");
       
-      // 计算当前页面的可用空间
-      const availableHeight = 1660 - 80 - (currentPage.currentY - currentPage.contentStartY);
-      
-      // 判断是否可以完整显示当前文本
-      if (currentPage.currentY + textHeight > 1650) { // 将底部边距从1600减少到仅10像素(1660-10)
-        // 当前页不够放下这个文本，创建新页
-        pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
-        isFirstPage = false;
-        currentPage = await createNewPage();
-      }
-      
-      // 绘制文本
-      const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
-      currentPage.ctx.font = '45px sans-serif';
-      currentPage.ctx.fillStyle = '#FFFFFF';
-      currentPage.ctx.textAlign = 'left';
-
-      lines.forEach((line, index) => {
-        if (index === 0) {
-          currentPage.ctx.fillText(
-            `${lineNumber}. ${line}`,
-            80,
-            currentPage.currentY
-          );
-          lineNumber++;
-        } else {
-          currentPage.ctx.fillText(
-            line,
-            80,
-            currentPage.currentY
-          );
+      while (currentTopicIndex < processedContent.length) {
+        const topic = processedContent[currentTopicIndex];
+        console.log(`谨慎模式(切片背景)-处理主题 ${currentTopicIndex + 1}/${processedContent.length}: ${topic.topic}`);
+        
+        // 设置当前处理状态为主题
+        currentProcessingState = 'topic';
+        
+        // 绘制主题标题
+        currentPage.ctx.font = 'bold 55px sans-serif';
+        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.textAlign = 'left';
+        
+        // 计算绘制主题需要的空间
+        const topicText = topic.topic;
+        const topicLines = this.wrapText(currentPage.ctx, topicText, 55, 1082);
+        console.log(`谨慎模式(切片背景)-主题标题分为 ${topicLines.length} 行`);
+        
+        // 检查页面剩余空间
+        const topicHeight = topicLines.length * 60 + 20; // 主题高度 + 额外间距
+        if (currentPage.currentY + topicHeight > 1650) {
+          // 当前页空间不足，创建新页
+          console.log(`谨慎模式(切片背景)-当前页面无法容纳主题标题，创建新页面`);
+          pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+          isFirstPage = false;
+          currentPage = await createNewPage();
+          
+          // 在新页面上重新设置主题字体样式
+          currentPage.ctx.font = 'bold 55px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
         }
-        currentPage.currentY += 60;
-        currentPage.linesOnPage++;
-      });
+        
+        // 绘制主题标题（添加emoji✅，加粗，并添加下划线）
+        topicLines.forEach((line, index) => {
+          // 绘制文本（加前缀emoji）
+          const textToDraw = index === 0 ? `✅ ${line}` : line;
+          currentPage.ctx.fillText(
+            textToDraw,
+            80,
+            currentPage.currentY
+          );
+          
+          // 绘制下划线
+          const textWidth = currentPage.ctx.measureText(textToDraw).width;
+          const underlineY = currentPage.currentY + 5; // 下划线位置在文本下方5px
+          currentPage.ctx.beginPath();
+          currentPage.ctx.moveTo(80, underlineY);
+          currentPage.ctx.lineTo(80 + textWidth, underlineY);
+          currentPage.ctx.lineWidth = 2;
+          currentPage.ctx.strokeStyle = '#FFFFFF';
+          currentPage.ctx.stroke();
+          
+          currentPage.currentY += 60;
+          currentPage.linesOnPage++;
+        });
+        
+        // 主题标题后增加间距
+        currentPage.currentY += 20;
+        
+        // 处理该主题下的所有子项目
+        currentItemIndex = 0;
+        
+        // 设置当前处理状态为子项目
+        currentProcessingState = 'item';
+        
+        while (currentItemIndex < topic.items.length) {
+          const text = topic.items[currentItemIndex];
+          console.log(`谨慎模式(切片背景)-处理主题 "${topic.topic}" 中的项目 ${currentItemIndex + 1}/${topic.items.length}: ${text.slice(0, 20)}...`);
+          
+          // 每次处理子项目前设置正确样式
+          currentPage.ctx.font = '45px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+          
+          const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+          console.log(`谨慎模式(切片背景)-子项目文本被分割为 ${lines.length} 行`);
+          
+          // 检查当前页是否还能容纳这段文字
+          const totalLinesNeeded = lines.length;
+          const willExceedLimit = currentPage.currentY + (totalLinesNeeded * 60) + 10 > 1650;
 
-      currentPage.currentY += 10; // 段落间距
-      currentTextIndex++;
+          if (willExceedLimit) {
+            console.log(`谨慎模式(切片背景)-当前页面已满，创建新页面 (处理子项目中)`);
+            pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+            isFirstPage = false;
+            currentPage = await createNewPage();
+            
+            // 确保新页面上使用子项目的字体样式
+            currentPage.ctx.font = '45px sans-serif';
+            currentPage.ctx.fillStyle = '#FFFFFF';
+            currentPage.ctx.textAlign = 'left';
+          }
+
+          // 绘制子项目文本
+          lines.forEach((line, index) => {
+            if (index === 0) {
+              currentPage.ctx.fillText(
+                `${lineNumber}. ${line}`,
+                80,
+                currentPage.currentY
+              );
+              lineNumber++;
+            } else {
+              currentPage.ctx.fillText(
+                line,
+                80,
+                currentPage.currentY
+              );
+            }
+            currentPage.currentY += 60;
+            currentPage.linesOnPage++;
+          });
+
+          currentPage.currentY += 10; // 段落间距
+          currentItemIndex++;
+        }
+        
+        // 主题之间增加额外间距
+        currentPage.currentY += 30;
+        currentTopicIndex++;
+      }
+    } else {
+      // 普通模式：处理扁平化的内容
+      currentProcessingState = 'none';
+      console.log(`谨慎模式-使用普通模式处理内容进行绘制，共 ${processedContent.length} 个项目`);
+      
+      // 计算文本会占用的高度
+      const calculateTextHeight = (ctx, text, fontSize, maxWidth) => {
+        const lines = this.wrapText(ctx, text, fontSize, maxWidth);
+        // 每行高度为60px，段落间距10px
+        return lines.length * 60 + 10; 
+      };
+      
+      while (currentTextIndex < processedContent.length) {
+        const text = processedContent[currentTextIndex];
+        console.log(`谨慎模式-处理文本索引 ${currentTextIndex}, 内容: ${text.slice(0, 20)}...`);
+        
+        // 确保使用正确的字体样式
+        currentPage.ctx.font = '45px sans-serif';
+        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.textAlign = 'left';
+        
+        // 计算当前文本需要的高度
+        const textHeight = calculateTextHeight(currentPage.ctx, text, 45, 1082);
+        
+        // 判断是否可以完整显示当前文本
+        if (currentPage.currentY + textHeight > 1650) {
+          console.log(`谨慎模式-当前页面不足以容纳文本，当前Y: ${currentPage.currentY}，需要高度: ${textHeight}，创建新页面`);
+          pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
+          isFirstPage = false;
+          currentPage = await createNewPage();
+          
+          // 确保新页面上使用正确的字体样式
+          currentPage.ctx.font = '45px sans-serif';
+          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+        }
+        
+        // 绘制文本
+        const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+        console.log(`谨慎模式-文本被分割为 ${lines.length} 行`);
+
+        lines.forEach((line, index) => {
+          if (index === 0) {
+            currentPage.ctx.fillText(
+              `${lineNumber}. ${line}`,
+              80,
+              currentPage.currentY
+            );
+            lineNumber++;
+          } else {
+            currentPage.ctx.fillText(
+              line,
+              80,
+              currentPage.currentY
+            );
+          }
+          currentPage.currentY += 60;
+          currentPage.linesOnPage++;
+        });
+
+        currentPage.currentY += 10; // 段落间距
+        currentTextIndex++;
+      }
     }
 
     // 添加最后一页
     if (currentPage && currentPage.linesOnPage > 0) {
+      console.log(`谨慎模式-添加最后一页，行数: ${currentPage.linesOnPage}`);
       pages.push(await this.canvasToBlob(currentPage.canvas, imageFormat));
     }
 
+    console.log(`谨慎模式-内页生成完成，共 ${pages.length} 页`);
     return pages;
   }
 
@@ -1684,6 +2545,14 @@ export class ImageProcessor {
             group.sort((a, b) => (a.groupOrder || 0) - (b.groupOrder || 0));
           });
           
+          // 为每个组内的文件添加新索引，从1开始
+          Object.values(groups).forEach(group => {
+            group.forEach((file, index) => {
+              file._newIndex = index + 1;
+              console.log(`组文件 ${file.name} 分配新索引: ${file._newIndex}`);
+            });
+          });
+          
           console.log(`基于groupId创建了 ${Object.keys(groups).length} 个分组`);
           return Object.values(groups);
         } else if (hasMetadata) {
@@ -1698,6 +2567,14 @@ export class ImageProcessor {
           // 排序
           Object.values(groups).forEach(group => {
             group.sort((a, b) => (a.__metadata__?.order || 0) - (b.__metadata__?.order || 0));
+          });
+          
+          // 为每个组内的文件添加新索引，从1开始
+          Object.values(groups).forEach(group => {
+            group.forEach((file, index) => {
+              file._newIndex = index + 1;
+              console.log(`组文件 ${file.name} 分配新索引: ${file._newIndex}`);
+            });
           });
           
           console.log(`基于__metadata__创建了 ${Object.keys(groups).length} 个分组`);
@@ -1752,18 +2629,32 @@ export class ImageProcessor {
               // 否则按字典序排序
               return nameA.localeCompare(nameB);
             });
+            
+            // 为每个组内的文件添加新索引，从1开始
+            group.forEach((file, index) => {
+              file._newIndex = index + 1;
+              console.log(`组文件 ${file.name} 分配新索引: ${file._newIndex}`);
+            });
           });
           
           console.log(`基于文件夹路径创建了 ${Object.keys(groups).length} 个分组:`);
           Object.keys(groups).forEach(key => {
-            console.log(`- 组 "${key}": ${groups[key].length}个文件`);
+            console.log(`- 组 "${key}": ${groups[key].length}个文件, 编号从1到${groups[key].length}`);
           });
           
           return Object.values(groups);
         } else {
           // 没有分组信息，将所有图片作为一个组
           console.log('没有找到分组信息，将所有图片作为一个组');
-          return [validImageFiles];
+          const singleGroup = validImageFiles;
+          
+          // 为单组内的文件添加新索引，从1开始
+          singleGroup.forEach((file, index) => {
+            file._newIndex = index + 1;
+            console.log(`组文件 ${file.name} 分配新索引: ${file._newIndex}`);
+          });
+          
+          return [singleGroup];
         }
       }
     } catch (error) {
@@ -1771,6 +2662,13 @@ export class ImageProcessor {
       console.log('由于出错，将所有图片作为一个组返回');
       // 出错时的安全回退：将所有有效图片作为一个组
       const safeImages = coverImages.filter(file => this.isImageFile(file));
+      
+      // 为安全回退的单组添加新索引，从1开始
+      safeImages.forEach((file, index) => {
+        file._newIndex = index + 1;
+        console.log(`安全回退：组文件 ${file.name} 分配新索引: ${file._newIndex}`);
+      });
+      
       return safeImages.length > 0 ? [safeImages] : [];
     }
   }

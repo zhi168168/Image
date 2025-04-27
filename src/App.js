@@ -22,36 +22,39 @@ function App() {
   });
 
   // 添加图片格式选择的 state
-  const [imageFormat, setImageFormat] = useState('jpeg');
+  const [imageFormat, setImageFormat] = useState(localStorage.getItem('imageFormat') || 'jpg');
   
   // 添加封面模式选择
-  const [coverMode, setCoverMode] = useState('single'); // single单图模式, multiple多图模式
+  const [coverMode, setCoverMode] = useState(localStorage.getItem('coverMode') || 'single'); // single单图模式, multiple多图模式
   
   // 添加内页使用规则模式选择
-  const [pageMode, setPageMode] = useState('cautious'); // flexible宽松模式, strict严谨模式, cautious谨慎模式
+  const [pageMode, setPageMode] = useState(localStorage.getItem('pageMode') || 'flexible'); // flexible宽松模式, strict严谨模式, cautious谨慎模式
   
   // 添加内页数量限制
-  const [pageLimit, setPageLimit] = useState(0); // 0表示不限制
+  const [pageLimit, setPageLimit] = useState(parseInt(localStorage.getItem('pageLimit') || '0', 10)); // 0表示不限制
   
   // 添加知识拼接模式
-  const [knowledgeMode, setKnowledgeMode] = useState(false); // 默认不启用知识拼接模式
-  const [knowledgeCount, setKnowledgeCount] = useState(0); // 每份文件需要的知识图片数量，0表示不需要
+  const [knowledgeMode, setKnowledgeMode] = useState(localStorage.getItem('knowledgeMode') === 'true'); // 默认不启用知识拼接模式
+  const [knowledgeCount, setKnowledgeCount] = useState(parseInt(localStorage.getItem('knowledgeCount') || '5', 10)); // 每份文件需要的知识图片数量，0表示不需要
   const [knowledgeExcel, setKnowledgeExcel] = useState(null); // 知识Excel文件
 
   // 添加内页素材切割模式
-  const [sliceMode, setSliceMode] = useState(false); // 默认不启用切割模式
-  const [sliceCount, setSliceCount] = useState(4); // 默认切割为4份(2x2)
+  const [sliceMode, setSliceMode] = useState(localStorage.getItem('sliceMode') === 'true'); // 默认不启用切割模式
+  const [sliceCount, setSliceCount] = useState(parseInt(localStorage.getItem('sliceCount') || '4', 10)); // 默认切割为4份(2x2)
 
   // 添加更多设置展开/收起状态
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
 
   // 在state中添加标题配置
   const [titleConfig, setTitleConfig] = useState({
-    text: '100份外企干货',
-    backgroundColor: '#1890ff'
+    text: localStorage.getItem('titleText') || '随机标题',
+    backgroundColor: localStorage.getItem('titleBackground') || '#0D6CD7'
   });
 
   const [resetDownloadStatus, setResetDownloadStatus] = useState(false);
+
+  // 在state中添加topicMode状态
+  const [topicMode, setTopicMode] = useState(localStorage.getItem('topicMode') === 'true'); // 添加主题模式状态
 
   // 在组件加载时检查是否有保存的Excel文件和文件名
   useEffect(() => {
@@ -310,7 +313,8 @@ function App() {
         knowledgeExcel,
         sliceMode,
         sliceCount,
-        coverMode
+        coverMode,
+        topicMode
       );
 
       console.log("处理结果:", result);
@@ -683,6 +687,27 @@ function App() {
                     {pageMode === 'flexible' && '宽松模式：背景图可重复使用，不受素材数量限制'}
                     {pageMode === 'strict' && '严谨模式：每个背景图只使用一次，需要足够的素材'}
                     {pageMode === 'cautious' && '谨慎模式：基于严谨模式，但只有第一页显示标题'}
+                  </div>
+                </div>
+
+                <div className="format-section">
+                  <h4>主题模式</h4>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={topicMode}
+                      onChange={(e) => {
+                        setTopicMode(e.target.checked);
+                        localStorage.setItem('topicMode', e.target.checked);
+                      }}
+                    />
+                    启用主题模式
+                  </label>
+                  <div className="mode-description">
+                    主题模式：将Excel中的每个工作表作为一个主题，实现主题分组展示
+                    {topicMode && <div style={{marginTop: '5px', color: '#faad14'}}>
+                      <strong>注意：</strong> 开启此选项时，请确保Excel文件包含多个工作表，每个工作表对应一个主题。
+                    </div>}
                   </div>
                 </div>
 
