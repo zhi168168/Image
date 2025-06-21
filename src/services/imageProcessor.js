@@ -4,7 +4,7 @@ import { saveAs } from 'file-saver';
 import { DBService } from './dbService';
 
 export class ImageProcessor {
-  static async processImages(coverImages, backgroundImages, excelFile, onProgress, titleConfig, imageFormat = 'png', pageMode = 'flexible', pageLimit = 0, knowledgeMode = false, knowledgeCount = 0, knowledgeExcel = null, sliceMode = false, sliceCount = 4, coverMode = 'single', topicMode = false) {
+  static async processImages(coverImages, backgroundImages, excelFile, onProgress, titleConfig, imageFormat = 'png', pageMode = 'flexible', pageLimit = 0, knowledgeMode = false, knowledgeCount = 0, knowledgeExcel = null, sliceMode = false, sliceCount = 4, coverMode = 'single', topicMode = false, contentStyle = null, startIndex = 1001, noteCount = 1, productPromoImage = null, promoPosition = 3) {
     console.log("===== 开始处理图片 =====");
     console.log("封面模式:", coverMode);
     console.log("封面图数量:", coverImages ? coverImages.length : 0);
@@ -14,6 +14,7 @@ export class ImageProcessor {
     console.log("切割模式:", sliceMode ? `启用 (${sliceCount}份)` : "禁用");
     console.log("知识拼接模式:", knowledgeMode ? `启用 (${knowledgeCount}份)` : "禁用");
     console.log("主题模式:", topicMode ? "启用" : "禁用");
+    console.log("产品宣传图:", productPromoImage ? `已上传，插入位置: 内页${promoPosition}` : "未上传");
 
     // 判断是否使用的是默认黑色封面
     const isUsingBlackCover = coverImages?.[0]?.name === 'black_cover.png';
@@ -77,9 +78,10 @@ export class ImageProcessor {
       // 创建 ZIP 文件
       const zip = new JSZip();
       
-      // 处理文件夹数量 - 使用封面图组数量或者1（如果没有封面图）
-      const totalSteps = organizedCovers.length || 1;
-      console.log(`需要处理的文件夹总数: ${totalSteps}`);
+      // 处理文件夹数量 - 如果有真实封面图则使用封面图组数量，否则使用noteCount
+      const hasRealCovers = organizedCovers.length > 0 && organizedCovers[0] && organizedCovers[0][0] && !organizedCovers[0][0]._isBlackCover;
+      const totalSteps = hasRealCovers ? organizedCovers.length : noteCount;
+      console.log(`需要处理的文件夹总数: ${totalSteps} (有真实封面图: ${hasRealCovers})`);
 
       // 背景图片索引（用于严谨模式）
       let backgroundIndex = 0;
@@ -96,7 +98,13 @@ export class ImageProcessor {
         console.log(`开始处理第 ${i + 1}/${totalSteps} 组图片`);
 
         // 处理封面图片组 - 可能存在或不存在
-        let coverGroup = organizedCovers[i] || null;
+        let coverGroup;
+        if (hasRealCovers) {
+          coverGroup = organizedCovers[i] || null;
+        } else {
+          // 没有真实封面图时，每次都使用同一个黑色封面组（如果存在）
+          coverGroup = organizedCovers.length > 0 ? organizedCovers[0] : null;
+        }
         console.log(`当前封面图组:`, coverGroup ? `包含 ${coverGroup.length} 张图片` : "无封面图");
         
         // 处理背景图片
@@ -126,7 +134,8 @@ export class ImageProcessor {
             textContent,
             titleConfig,
             imageFormat,
-            topicMode
+            topicMode,
+            contentStyle
           );
         } else if (pageMode === 'cautious') {
           // 谨慎模式：每个内页使用不同的背景，只有第一页显示标题
@@ -139,7 +148,8 @@ export class ImageProcessor {
                 textContent,
                 titleConfig,
                 imageFormat,
-                topicMode
+                topicMode,
+                contentStyle
               );
             } else {
               // 非切割模式，使用原始背景图
@@ -150,7 +160,8 @@ export class ImageProcessor {
                 textContent,
                 titleConfig,
                 imageFormat,
-                topicMode
+                topicMode,
+                contentStyle
               );
             }
             
@@ -173,7 +184,8 @@ export class ImageProcessor {
                 textContent,
                 titleConfig,
                 imageFormat,
-                topicMode
+                topicMode,
+                contentStyle
               );
             } else {
               // 非切割模式，使用原始背景图
@@ -184,7 +196,8 @@ export class ImageProcessor {
                 textContent,
                 titleConfig,
                 imageFormat,
-                topicMode
+                topicMode,
+                contentStyle
               );
             }
             
@@ -217,21 +230,17 @@ export class ImageProcessor {
           }
         }
 
-        // 获取文件夹编号并确保完成存储
-        const nextIndex = await DBService.getNextAvailableIndex();
-        await DBService.markIndexAsUsed(nextIndex);
-        
-        // 等待一段时间确保 IndexedDB 操作完成
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const folderName = String(nextIndex).padStart(4, '0');
-        console.log(`Creating folder: ${folderName}`); // 添加日志
+        // 使用自定义起始序号
+        const customIndex = startIndex + i;
+        const folderName = String(customIndex).padStart(4, '0');
+        console.log(`Creating folder: ${folderName} (使用自定义起始序号: ${startIndex})`); // 添加日志
         
         // 创建文件夹并添加文件
         const folder = zip.folder(folderName);
         
         // 处理封面图
-        if (coverGroup && !isUsingBlackCover) {
+        const hasBlackCover = coverGroup && coverGroup[0] && coverGroup[0]._isBlackCover;
+        if (coverGroup && !isUsingBlackCover && !hasBlackCover) {
           console.log(`开始处理封面图组: ${coverGroup.length}张图片`);
           
           // 检查封面组是否有效
@@ -350,20 +359,52 @@ export class ImageProcessor {
             }
           }
         } else {
-          console.log(`跳过封面图处理: ${isUsingBlackCover ? "使用默认黑色封面" : "无封面组"}`);
+          const reasonText = hasBlackCover ? "使用默认黑色封面(不生成文件)" : 
+                            isUsingBlackCover ? "使用默认黑色封面" : "无封面组";
+          console.log(`跳过封面图处理: ${reasonText}`);
         }
         
-        // 添加内页
-        contentPages.forEach((pageBlob, pageIndex) => {
-          // 根据封面图数量调整内页编号
-          const coverCount = coverGroup && !isUsingBlackCover ? coverGroup.length : 
-                             (coverMode === 'single' && !isUsingBlackCover ? 1 : 0);
-          folder.file(`内页${pageIndex + 1 + coverCount}.${imageFormat}`, pageBlob);
-        });
+        // 添加内页（包含产品宣传图插入逻辑）
+        const coverCount = (coverGroup && !isUsingBlackCover && !hasBlackCover) ? coverGroup.length : 
+                           (coverMode === 'single' && !isUsingBlackCover && !hasBlackCover ? 1 : 0);
         
-        // 记录当前图片总数，用于知识图片的连续编号
-        const totalImagesCount = (coverGroup && !isUsingBlackCover ? coverGroup.length : 
-                               (coverMode === 'single' && !isUsingBlackCover ? 1 : 0)) + contentPages.length;
+        // 处理产品宣传图
+        let promoBlob = null;
+        if (productPromoImage) {
+          try {
+            console.log(`处理产品宣传图: ${productPromoImage.name}, 插入位置: 内页${promoPosition}`);
+            promoBlob = await this.processProductPromoImage(productPromoImage, imageFormat);
+            console.log(`产品宣传图处理完成`);
+          } catch (error) {
+            console.error(`处理产品宣传图失败:`, error);
+          }
+        }
+        
+        // 添加内页，考虑产品宣传图的插入
+        for (let pageIndex = 0; pageIndex < contentPages.length; pageIndex++) {
+          const pageBlob = contentPages[pageIndex];
+          // 当没有封面图或使用黑色封面时，内页从1开始命名
+          const basePageNumber = coverCount > 0 ? pageIndex + 1 + coverCount : pageIndex + 1;
+          
+          // 检查是否需要在当前位置插入产品宣传图
+          if (promoBlob && basePageNumber === promoPosition) {
+            // 先插入产品宣传图
+            folder.file(`内页${promoPosition}.${imageFormat}`, promoBlob);
+            console.log(`产品宣传图已插入到内页${promoPosition}位置`);
+            // 当前内容页和后续页面都需要向后顺延
+            folder.file(`内页${basePageNumber + 1}.${imageFormat}`, pageBlob);
+          } else if (promoBlob && basePageNumber > promoPosition) {
+            // 产品宣传图已插入，后续页面都需要+1
+            folder.file(`内页${basePageNumber + 1}.${imageFormat}`, pageBlob);
+          } else {
+            // 正常添加内页
+            folder.file(`内页${basePageNumber}.${imageFormat}`, pageBlob);
+          }
+        }
+        
+        // 记录当前图片总数，用于知识图片的连续编号，黑色封面不计入数量
+        // 重用之前计算的coverCount
+        const totalImagesCount = (coverCount > 0 ? coverCount : 0) + contentPages.length + (promoBlob ? 1 : 0);
         
         // 如果启用了知识拼接模式，生成知识图片
         if (knowledgeMode && knowledgeCount > 0) {
@@ -375,7 +416,13 @@ export class ImageProcessor {
                 knowledge.content,
                 imageFormat
               );
-              folder.file(`内页${totalImagesCount + k + 1}.${imageFormat}`, knowledgeImage);
+              // 知识图片编号需要考虑产品宣传图的影响
+              let knowledgePageNumber = totalImagesCount + k + 1;
+              // 如果知识图片的位置受到产品宣传图影响，需要调整编号
+              if (promoBlob && knowledgePageNumber >= promoPosition) {
+                knowledgePageNumber += 1;
+              }
+              folder.file(`内页${knowledgePageNumber}.${imageFormat}`, knowledgeImage);
             }
           }
         }
@@ -634,11 +681,14 @@ export class ImageProcessor {
     });
   }
 
-  static async generateContentPages(backgroundCanvas, textContent, titleConfig, imageFormat = 'png', topicMode = false) {
+  static async generateContentPages(backgroundCanvas, textContent, titleConfig, imageFormat = 'png', topicMode = false, contentStyle = null) {
     // 检查是否是结构化的主题数据
     const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
                              typeof textContent[0] === 'object' && textContent[0].topic && 
                              Array.isArray(textContent[0].items);
+    
+    // 计算内容行间距
+    const contentLineHeight = Math.round((contentStyle?.fontSize || 45) * (contentStyle?.lineHeight || 1.6));
     
     let processedContent;
     
@@ -694,41 +744,35 @@ export class ImageProcessor {
       // 复制背景
       ctx.drawImage(backgroundCanvas, 0, 0);
 
-      // 设置标题字体以计算高度
-      ctx.font = '80px sans-serif';
-      const titleMetrics = ctx.measureText(titleConfig.text);
-      const titleHeight = titleMetrics.actualBoundingBoxAscent + titleMetrics.actualBoundingBoxDescent;
-      const titleBackgroundHeight = titleHeight * 1.2;
-      const titleWidth = titleMetrics.width * 1.2;
+      // 设置标题字体
+      const titleFontSize = titleConfig.fontSize || 50;
+      const titleY = 140;
 
-      // 计算标题背景位置
-      const titleBackgroundX = (canvas.width - titleWidth) / 2;
-      const cornerRadius = 10;
+      // 绘制标题文字（使用特效）
+      this.drawTextWithEffect(
+        ctx,
+        titleConfig.text,
+        canvas.width / 2,
+        titleY,
+        titleFontSize,
+        titleConfig.textEffect || 'none',
+        titleConfig.effectColor || '#FFFFFF',
+        titleConfig.effectIntensity || 3,
+        titleConfig.fontFamily || 'sans-serif',
+        titleConfig.textColor || '#FFFFFF',
+        titleConfig.strokeWidth || 2.0
+      );
 
-      // 使用配置的背景色
-      ctx.fillStyle = titleConfig.backgroundColor;
-      ctx.beginPath();
-      ctx.moveTo(titleBackgroundX + cornerRadius, 80);
-      ctx.lineTo(titleBackgroundX + titleWidth - cornerRadius, 80);
-      ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80, titleBackgroundX + titleWidth, 80 + cornerRadius);
-      ctx.lineTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight - cornerRadius);
-      ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight, titleBackgroundX + titleWidth - cornerRadius, 80 + titleBackgroundHeight);
-      ctx.lineTo(titleBackgroundX + cornerRadius, 80 + titleBackgroundHeight);
-      ctx.quadraticCurveTo(titleBackgroundX, 80 + titleBackgroundHeight, titleBackgroundX, 80 + titleBackgroundHeight - cornerRadius);
-      ctx.lineTo(titleBackgroundX, 80 + cornerRadius);
-      ctx.quadraticCurveTo(titleBackgroundX, 80, titleBackgroundX + cornerRadius, 80);
-      ctx.closePath();
-      ctx.fill();
-
-      // 绘制标题文字
-      ctx.fillStyle = '#FFFFFF';
-      ctx.textAlign = 'center';
-      ctx.fillText(titleConfig.text, canvas.width / 2, 80 + titleHeight);
+      // 计算标题实际占用的高度，确保内容不重叠
+      // 标题基线在titleY，向上约占字体大小的0.3，向下约占字体大小的0.7
+      // 加上特效可能的额外空间（effectIntensity），再加上安全间距
+      const titleBottomY = titleY + (titleFontSize * 0.7) + (titleConfig.effectIntensity || 3) + 80;
+      const contentStartY = Math.max(titleBottomY, 200); // 至少从200px开始，或者标题底部+间距
 
       return {
         canvas,
         ctx,
-        currentY: 80 + titleBackgroundHeight + 100,
+        currentY: contentStartY,
         linesOnPage: 0
       };
     };
@@ -743,13 +787,14 @@ export class ImageProcessor {
         const topic = processedContent[currentTopicIndex];
         
         // 绘制主题标题
-        currentPage.ctx.font = 'bold 55px sans-serif';
-        currentPage.ctx.fillStyle = '#FFFFFF';
+        const topicFontSize = contentStyle?.fontSize ? Math.round(contentStyle.fontSize * 1.2) : 55;
+        currentPage.ctx.font = `bold ${topicFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+        currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
         currentPage.ctx.textAlign = 'left';
         
-        // 计算绘制主题需要的空间
-        const topicText = topic.topic;
-        const topicLines = this.wrapText(currentPage.ctx, topicText, 55, 1082);
+                  // 计算绘制主题需要的空间
+          const topicText = topic.topic;
+          const topicLines = this.wrapText(currentPage.ctx, topicText, topicFontSize, 1082);
         
         // 检查页面剩余空间
         const topicHeight = topicLines.length * 60 + 20; // 主题高度 + 额外间距
@@ -760,7 +805,7 @@ export class ImageProcessor {
           
           // 在新页面上重新设置主题字体样式
           currentPage.ctx.font = 'bold 55px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
         }
         
@@ -784,7 +829,7 @@ export class ImageProcessor {
           currentPage.ctx.strokeStyle = '#FFFFFF';
           currentPage.ctx.stroke();
           
-          currentPage.currentY += 60;
+          currentPage.currentY += contentLineHeight;
           currentPage.linesOnPage++;
         });
         
@@ -797,9 +842,11 @@ export class ImageProcessor {
           const text = topic.items[currentItemIndex];
           
           // 正常字体绘制子项目
-          currentPage.ctx.font = '45px sans-serif';
+          const contentFontSize = contentStyle?.fontSize || 45;
+          currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           
-          const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+          const lines = this.wrapText(currentPage.ctx, text, contentFontSize, 1082);
           
           // 检查当前页是否还能容纳这段文字
           const totalLinesNeeded = lines.length;
@@ -810,8 +857,9 @@ export class ImageProcessor {
             currentPage = createNewPage();
             
             // 重要：确保新页面上使用子项目的正确字体样式
-            currentPage.ctx.font = '45px sans-serif';
-            currentPage.ctx.fillStyle = '#FFFFFF';
+            const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+            currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
             currentPage.ctx.textAlign = 'left';
           }
 
@@ -831,7 +879,7 @@ export class ImageProcessor {
                 currentPage.currentY
               );
             }
-            currentPage.currentY += 60;
+            currentPage.currentY += contentLineHeight;
             currentPage.linesOnPage++;
           });
 
@@ -859,14 +907,16 @@ export class ImageProcessor {
           currentPage = createNewPage();
           
           // 重要：确保新页面上使用子项目的正确字体样式
-          currentPage.ctx.font = '45px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
         }
 
         // 绘制文本
-        currentPage.ctx.font = '45px sans-serif';
-        currentPage.ctx.fillStyle = '#FFFFFF';
+        const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+        currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
         currentPage.ctx.textAlign = 'left';
 
         lines.forEach((line, index) => {
@@ -884,7 +934,7 @@ export class ImageProcessor {
               currentPage.currentY
             );
           }
-          currentPage.currentY += 60;
+          currentPage.currentY += contentLineHeight;
           currentPage.linesOnPage++;
         });
 
@@ -998,12 +1048,47 @@ export class ImageProcessor {
     });
   }
 
+  // 处理产品宣传图，转换为指定格式
+  static async processProductPromoImage(promoImage, imageFormat = 'png') {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // 设置画布尺寸为1242x1660（与内页相同）
+        canvas.width = 1242;
+        canvas.height = 1660;
+
+        // 计算缩放比例
+        const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
+        const scaledWidth = img.width * scale;
+        const scaledHeight = img.height * scale;
+
+        // 计算居中位置
+        const x = (canvas.width - scaledWidth) / 2;
+        const y = (canvas.height - scaledHeight) / 2;
+
+        // 绘制图片
+        ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+
+        // 转换为指定格式的Blob
+        this.canvasToBlob(canvas, imageFormat).then(resolve).catch(reject);
+      };
+      img.onerror = reject;
+      img.src = URL.createObjectURL(promoImage);
+    });
+  }
+
   // 严谨模式：生成内页，每页使用不同的背景图
-  static async generateContentPagesStrict(backgroundImages, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false) {
+  static async generateContentPagesStrict(backgroundImages, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false, contentStyle = null) {
     // 检查是否是结构化的主题数据
     const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
                              typeof textContent[0] === 'object' && textContent[0].topic && 
                              Array.isArray(textContent[0].items);
+    
+    // 计算内容行间距
+    const contentLineHeight = Math.round((contentStyle?.fontSize || 45) * (contentStyle?.lineHeight || 1.6));
     
     let processedContent;
     
@@ -1072,41 +1157,33 @@ export class ImageProcessor {
       // 复制背景
       ctx.drawImage(backgroundCanvas, 0, 0);
 
-      // 设置标题字体以计算高度
-      ctx.font = '80px sans-serif';
-      const titleMetrics = ctx.measureText(titleConfig.text);
-      const titleHeight = titleMetrics.actualBoundingBoxAscent + titleMetrics.actualBoundingBoxDescent;
-      const titleBackgroundHeight = titleHeight * 1.2;
-      const titleWidth = titleMetrics.width * 1.2;
+      // 设置标题字体
+      const titleFontSize = titleConfig.fontSize || 50;
+      const titleY = 140;
 
-      // 计算标题背景位置
-      const titleBackgroundX = (canvas.width - titleWidth) / 2;
-      const cornerRadius = 10;
+      // 绘制标题文字（使用特效）
+      this.drawTextWithEffect(
+        ctx,
+        titleConfig.text,
+        canvas.width / 2,
+        titleY,
+        titleFontSize,
+        titleConfig.textEffect || 'none',
+        titleConfig.effectColor || '#FFFFFF',
+        titleConfig.effectIntensity || 3,
+        titleConfig.fontFamily || 'sans-serif',
+        titleConfig.textColor || '#FFFFFF',
+        titleConfig.strokeWidth || 2.0
+      );
 
-      // 使用配置的背景色
-      ctx.fillStyle = titleConfig.backgroundColor;
-      ctx.beginPath();
-      ctx.moveTo(titleBackgroundX + cornerRadius, 80);
-      ctx.lineTo(titleBackgroundX + titleWidth - cornerRadius, 80);
-      ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80, titleBackgroundX + titleWidth, 80 + cornerRadius);
-      ctx.lineTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight - cornerRadius);
-      ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight, titleBackgroundX + titleWidth - cornerRadius, 80 + titleBackgroundHeight);
-      ctx.lineTo(titleBackgroundX + cornerRadius, 80 + titleBackgroundHeight);
-      ctx.quadraticCurveTo(titleBackgroundX, 80 + titleBackgroundHeight, titleBackgroundX, 80 + titleBackgroundHeight - cornerRadius);
-      ctx.lineTo(titleBackgroundX, 80 + cornerRadius);
-      ctx.quadraticCurveTo(titleBackgroundX, 80, titleBackgroundX + cornerRadius, 80);
-      ctx.closePath();
-      ctx.fill();
-
-      // 绘制标题文字
-      ctx.fillStyle = '#FFFFFF';
-      ctx.textAlign = 'center';
-      ctx.fillText(titleConfig.text, canvas.width / 2, 80 + titleHeight);
+      // 计算标题实际占用的高度，确保内容不重叠
+      const titleBottomY = titleY + (titleFontSize * 0.7) + (titleConfig.effectIntensity || 3) + 80;
+      const contentStartY = Math.max(titleBottomY, 200);
 
       return {
         canvas,
         ctx,
-        currentY: 80 + titleBackgroundHeight + 100,
+        currentY: contentStartY,
         linesOnPage: 0
       };
     };
@@ -1123,7 +1200,7 @@ export class ImageProcessor {
         
         // 绘制主题标题
         currentPage.ctx.font = 'bold 55px sans-serif';
-        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
         currentPage.ctx.textAlign = 'left';
         
         // 计算绘制主题需要的空间
@@ -1140,7 +1217,7 @@ export class ImageProcessor {
           
           // 在新页面上重新设置主题字体样式
           currentPage.ctx.font = 'bold 55px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
         }
         
@@ -1164,7 +1241,7 @@ export class ImageProcessor {
           currentPage.ctx.strokeStyle = '#FFFFFF';
           currentPage.ctx.stroke();
           
-          currentPage.currentY += 60;
+          currentPage.currentY += contentLineHeight;
           currentPage.linesOnPage++;
         });
         
@@ -1180,16 +1257,17 @@ export class ImageProcessor {
           console.log(`严谨模式-处理主题 "${topic.topic}" 中的项目 ${currentItemIndex + 1}/${topic.items.length}: ${text.slice(0, 20)}...`);
           
           // 正常字体绘制子项目
-          currentPage.ctx.font = '45px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          const contentFontSize = contentStyle?.fontSize || 45;
+          currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
           
-          const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+          const lines = this.wrapText(currentPage.ctx, text, contentFontSize, 1082);
           console.log(`严谨模式-文本被分割为 ${lines.length} 行`);
           
           // 检查当前页是否还能容纳这段文字
           const totalLinesNeeded = lines.length;
-          const willExceedLimit = currentPage.currentY + (totalLinesNeeded * 60) + 10 > 1650;
+          const willExceedLimit = currentPage.currentY + (totalLinesNeeded * contentLineHeight) + 10 > 1650;
 
           if (willExceedLimit) {
             console.log(`严谨模式-当前页面已满，创建新页面`);
@@ -1197,8 +1275,8 @@ export class ImageProcessor {
             currentPage = await createNewPage();
             
             // 确保新页面上使用子项目的字体样式，而不是主题样式
-            currentPage.ctx.font = '45px sans-serif';
-            currentPage.ctx.fillStyle = '#FFFFFF';
+            currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+            currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
             currentPage.ctx.textAlign = 'left';
           }
 
@@ -1218,7 +1296,7 @@ export class ImageProcessor {
                 currentPage.currentY
               );
             }
-            currentPage.currentY += 60;
+            currentPage.currentY += contentLineHeight;
             currentPage.linesOnPage++;
           });
 
@@ -1250,8 +1328,9 @@ export class ImageProcessor {
         }
 
         // 绘制文本
-        currentPage.ctx.font = '45px sans-serif'; // 字号改为45px
-        currentPage.ctx.fillStyle = '#FFFFFF';
+        const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`; // 字号改为45px
+        currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
         currentPage.ctx.textAlign = 'left';
 
         lines.forEach((line, index) => {
@@ -1269,7 +1348,7 @@ export class ImageProcessor {
               currentPage.currentY
             );
           }
-          currentPage.currentY += 60; // 行间距改为60px
+          currentPage.currentY += contentLineHeight;
           currentPage.linesOnPage++;
         });
 
@@ -1289,11 +1368,14 @@ export class ImageProcessor {
   }
 
   // 添加新的谨慎模式函数（切割模式）：基于严谨模式，但只有第一页显示标题
-  static async generateContentPagesCautious(backgroundImages, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false) {
+  static async generateContentPagesCautious(backgroundImages, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false, contentStyle = null) {
     // 检查是否是结构化的主题数据
     const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
                              typeof textContent[0] === 'object' && textContent[0].topic && 
                              Array.isArray(textContent[0].items);
+    
+    // 计算内容行间距
+    const contentLineHeight = Math.round((contentStyle?.fontSize || 45) * (contentStyle?.lineHeight || 1.6));
     
     let processedContent;
     let currentProcessingState = 'none'; // 'none', 'topic', 'item' - 标记当前处理的是主题还是子项目
@@ -1347,7 +1429,7 @@ export class ImageProcessor {
     const calculateTextHeight = (ctx, text, fontSize, maxWidth) => {
       const lines = this.wrapText(ctx, text, fontSize, maxWidth);
       // 每行高度为60px，段落间距10px
-      return lines.length * 60 + 10; 
+      return lines.length * contentLineHeight + 10; 
     };
 
     // 创建新页面
@@ -1372,42 +1454,34 @@ export class ImageProcessor {
 
       // 只在第一页显示标题
       if (isFirstPage) {
-        // 设置标题字体以计算高度
-        ctx.font = '80px sans-serif';
-        const titleMetrics = ctx.measureText(titleConfig.text);
-        const titleHeight = titleMetrics.actualBoundingBoxAscent + titleMetrics.actualBoundingBoxDescent;
-        const titleBackgroundHeight = titleHeight * 1.2;
-        const titleWidth = titleMetrics.width * 1.2;
+        // 设置标题字体
+        const titleFontSize = titleConfig.fontSize || 50;
+        const titleY = 140;
 
-        // 计算标题背景位置
-        const titleBackgroundX = (canvas.width - titleWidth) / 2;
-        const cornerRadius = 10;
+        // 绘制标题文字（使用特效）
+        this.drawTextWithEffect(
+          ctx,
+          titleConfig.text,
+          canvas.width / 2,
+          titleY,
+          titleFontSize,
+          titleConfig.textEffect || 'none',
+          titleConfig.effectColor || '#FFFFFF',
+          titleConfig.effectIntensity || 3,
+          titleConfig.fontFamily || 'sans-serif',
+          titleConfig.textColor || '#FFFFFF',
+          titleConfig.strokeWidth || 2.0
+        );
 
-        // 使用配置的背景色
-        ctx.fillStyle = titleConfig.backgroundColor;
-        ctx.beginPath();
-        ctx.moveTo(titleBackgroundX + cornerRadius, 80);
-        ctx.lineTo(titleBackgroundX + titleWidth - cornerRadius, 80);
-        ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80, titleBackgroundX + titleWidth, 80 + cornerRadius);
-        ctx.lineTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight - cornerRadius);
-        ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight, titleBackgroundX + titleWidth - cornerRadius, 80 + titleBackgroundHeight);
-        ctx.lineTo(titleBackgroundX + cornerRadius, 80 + titleBackgroundHeight);
-        ctx.quadraticCurveTo(titleBackgroundX, 80 + titleBackgroundHeight, titleBackgroundX, 80 + titleBackgroundHeight - cornerRadius);
-        ctx.lineTo(titleBackgroundX, 80 + cornerRadius);
-        ctx.quadraticCurveTo(titleBackgroundX, 80, titleBackgroundX + cornerRadius, 80);
-        ctx.closePath();
-        ctx.fill();
-
-        // 绘制标题文字
-        ctx.fillStyle = '#FFFFFF';
-        ctx.textAlign = 'center';
-        ctx.fillText(titleConfig.text, canvas.width / 2, 80 + titleHeight);
+        // 计算标题实际占用的高度，确保内容不重叠
+        const titleBottomY = titleY + (titleFontSize * 0.7) + (titleConfig.effectIntensity || 3) + 80;
+        const contentStartY = Math.max(titleBottomY, 200);
 
         return {
           canvas,
           ctx,
-          currentY: 80 + titleBackgroundHeight + 100,
-          contentStartY: 80 + titleBackgroundHeight + 100,
+          currentY: contentStartY,
+          contentStartY: contentStartY,
           linesOnPage: 0
         };
       } else {
@@ -1454,7 +1528,7 @@ export class ImageProcessor {
         
         // 绘制主题标题
         currentPage.ctx.font = 'bold 55px sans-serif';
-        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
         currentPage.ctx.textAlign = 'left';
         
         // 计算绘制主题需要的空间
@@ -1473,7 +1547,7 @@ export class ImageProcessor {
           
           // 在新页面上重新设置主题字体样式
           currentPage.ctx.font = 'bold 55px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
         }
         
@@ -1497,7 +1571,7 @@ export class ImageProcessor {
           currentPage.ctx.strokeStyle = '#FFFFFF';
           currentPage.ctx.stroke();
           
-          currentPage.currentY += 60;
+          currentPage.currentY += contentLineHeight;
           currentPage.linesOnPage++;
         });
         
@@ -1515,16 +1589,17 @@ export class ImageProcessor {
           console.log(`谨慎模式-处理主题 "${topic.topic}" 中的项目 ${currentItemIndex + 1}/${topic.items.length}: ${text.slice(0, 20)}...`);
           
           // 每次处理子项目前设置正确样式
-          currentPage.ctx.font = '45px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          const contentFontSize = contentStyle?.fontSize || 45;
+          currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
           
-          const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
+          const lines = this.wrapText(currentPage.ctx, text, contentFontSize, 1082);
           console.log(`谨慎模式-子项目文本被分割为 ${lines.length} 行`);
           
           // 检查当前页是否还能容纳这段文字
           const totalLinesNeeded = lines.length;
-          const willExceedLimit = currentPage.currentY + (totalLinesNeeded * 60) + 10 > 1650;
+          const willExceedLimit = currentPage.currentY + (totalLinesNeeded * contentLineHeight) + 10 > 1650;
 
           if (willExceedLimit) {
             console.log(`谨慎模式-当前页面已满，创建新页面 (处理子项目中)`);
@@ -1533,8 +1608,8 @@ export class ImageProcessor {
             currentPage = await createNewPage();
             
             // 确保新页面上使用子项目的字体样式
-            currentPage.ctx.font = '45px sans-serif';
-            currentPage.ctx.fillStyle = '#FFFFFF';
+            currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+            currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
             currentPage.ctx.textAlign = 'left';
           }
 
@@ -1554,7 +1629,7 @@ export class ImageProcessor {
                 currentPage.currentY
               );
             }
-            currentPage.currentY += 60;
+            currentPage.currentY += contentLineHeight;
             currentPage.linesOnPage++;
           });
 
@@ -1575,7 +1650,7 @@ export class ImageProcessor {
       const calculateTextHeight = (ctx, text, fontSize, maxWidth) => {
         const lines = this.wrapText(ctx, text, fontSize, maxWidth);
         // 每行高度为60px，段落间距10px
-        return lines.length * 60 + 10; 
+        return lines.length * contentLineHeight + 10; 
       };
       
       while (currentTextIndex < processedContent.length) {
@@ -1583,8 +1658,9 @@ export class ImageProcessor {
         console.log(`谨慎模式-处理文本索引 ${currentTextIndex}, 内容: ${text.slice(0, 20)}...`);
         
         // 确保使用正确的字体样式
-        currentPage.ctx.font = '45px sans-serif';
-        currentPage.ctx.fillStyle = '#FFFFFF';
+        const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+        currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
         currentPage.ctx.textAlign = 'left';
         
         // 计算当前文本需要的高度
@@ -1598,8 +1674,9 @@ export class ImageProcessor {
           currentPage = await createNewPage();
           
           // 确保新页面上使用正确的字体样式
-          currentPage.ctx.font = '45px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
         }
         
@@ -1622,7 +1699,7 @@ export class ImageProcessor {
               currentPage.currentY
             );
           }
-          currentPage.currentY += 60;
+          currentPage.currentY += contentLineHeight;
           currentPage.linesOnPage++;
         });
 
@@ -1919,7 +1996,10 @@ export class ImageProcessor {
     });
   }
 
-  static async generateContentPagesStrictWithProcessedBackgrounds(processedBackgrounds, startIndex, textContent, titleConfig, imageFormat = 'png') {
+  static async generateContentPagesStrictWithProcessedBackgrounds(processedBackgrounds, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false, contentStyle = null) {
+    // 计算内容行间距
+    const contentLineHeight = Math.round((contentStyle?.fontSize || 45) * (contentStyle?.lineHeight || 1.6));
+    
     // 随机打乱文字内容
     const shuffledContent = this.shuffleArray([...textContent]);
     const pages = [];
@@ -1947,41 +2027,33 @@ export class ImageProcessor {
       // 复制背景
       ctx.drawImage(backgroundCanvas, 0, 0);
 
-      // 设置标题字体以计算高度
-      ctx.font = '80px sans-serif';
-      const titleMetrics = ctx.measureText(titleConfig.text);
-      const titleHeight = titleMetrics.actualBoundingBoxAscent + titleMetrics.actualBoundingBoxDescent;
-      const titleBackgroundHeight = titleHeight * 1.2;
-      const titleWidth = titleMetrics.width * 1.2;
+      // 设置标题字体
+      const titleFontSize = titleConfig.fontSize || 50;
+      const titleY = 140;
 
-      // 计算标题背景位置
-      const titleBackgroundX = (canvas.width - titleWidth) / 2;
-      const cornerRadius = 10;
+      // 绘制标题文字（使用特效）
+      this.drawTextWithEffect(
+        ctx,
+        titleConfig.text,
+        canvas.width / 2,
+        titleY,
+        titleFontSize,
+        titleConfig.textEffect || 'none',
+        titleConfig.effectColor || '#FFFFFF',
+        titleConfig.effectIntensity || 3,
+        titleConfig.fontFamily || 'sans-serif',
+        titleConfig.textColor || '#FFFFFF',
+        titleConfig.strokeWidth || 2.0
+      );
 
-      // 使用配置的背景色
-      ctx.fillStyle = titleConfig.backgroundColor;
-      ctx.beginPath();
-      ctx.moveTo(titleBackgroundX + cornerRadius, 80);
-      ctx.lineTo(titleBackgroundX + titleWidth - cornerRadius, 80);
-      ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80, titleBackgroundX + titleWidth, 80 + cornerRadius);
-      ctx.lineTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight - cornerRadius);
-      ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight, titleBackgroundX + titleWidth - cornerRadius, 80 + titleBackgroundHeight);
-      ctx.lineTo(titleBackgroundX + cornerRadius, 80 + titleBackgroundHeight);
-      ctx.quadraticCurveTo(titleBackgroundX, 80 + titleBackgroundHeight, titleBackgroundX, 80 + titleBackgroundHeight - cornerRadius);
-      ctx.lineTo(titleBackgroundX, 80 + cornerRadius);
-      ctx.quadraticCurveTo(titleBackgroundX, 80, titleBackgroundX + cornerRadius, 80);
-      ctx.closePath();
-      ctx.fill();
-
-      // 绘制标题文字
-      ctx.fillStyle = '#FFFFFF';
-      ctx.textAlign = 'center';
-      ctx.fillText(titleConfig.text, canvas.width / 2, 80 + titleHeight);
+      // 计算标题实际占用的高度，确保内容不重叠
+      const titleBottomY = titleY + (titleFontSize * 0.7) + (titleConfig.effectIntensity || 3) + 80;
+      const contentStartY = Math.max(titleBottomY, 200);
 
       return {
         canvas,
         ctx,
-        currentY: 80 + titleBackgroundHeight + 100,
+        currentY: contentStartY,
         linesOnPage: 0
       };
     };
@@ -2003,8 +2075,9 @@ export class ImageProcessor {
       }
 
       // 绘制文本
-      currentPage.ctx.font = '45px sans-serif'; // 字号改为45px
-      currentPage.ctx.fillStyle = '#FFFFFF';
+      const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`; // 字号改为45px
+      currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
       currentPage.ctx.textAlign = 'left';
 
       lines.forEach((line, index) => {
@@ -2022,7 +2095,7 @@ export class ImageProcessor {
             currentPage.currentY
           );
         }
-        currentPage.currentY += 60; // 行间距改为60px
+        currentPage.currentY += contentLineHeight; // 行间距改为60px
         currentPage.linesOnPage++;
       });
 
@@ -2039,12 +2112,15 @@ export class ImageProcessor {
   }
 
   // 添加新的谨慎模式函数（切割模式）：基于严谨模式，但只有第一页显示标题
-  static async generateContentPagesCautiousWithProcessedBackgrounds(processedBackgrounds, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false) {
+  static async generateContentPagesCautiousWithProcessedBackgrounds(processedBackgrounds, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false, contentStyle = null) {
     // 基于谨慎模式的切片背景版本实现
     // 确保在主题模式下跨页时能正确保持字体样式
     const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
                              typeof textContent[0] === 'object' && textContent[0].topic && 
                              Array.isArray(textContent[0].items);
+    
+    // 计算内容行间距
+    const contentLineHeight = Math.round((contentStyle?.fontSize || 45) * (contentStyle?.lineHeight || 1.6));
     
     let processedContent;
     let processingSubItems = false; // 标记是否正在处理子项目
@@ -2115,42 +2191,34 @@ export class ImageProcessor {
 
       // 只在第一页显示标题
       if (isFirstPage) {
-        // 设置标题字体以计算高度
-        ctx.font = '80px sans-serif';
-        const titleMetrics = ctx.measureText(titleConfig.text);
-        const titleHeight = titleMetrics.actualBoundingBoxAscent + titleMetrics.actualBoundingBoxDescent;
-        const titleBackgroundHeight = titleHeight * 1.2;
-        const titleWidth = titleMetrics.width * 1.2;
+        // 设置标题字体
+        const titleFontSize = titleConfig.fontSize || 50;
+        const titleY = 140;
 
-        // 计算标题背景位置
-        const titleBackgroundX = (canvas.width - titleWidth) / 2;
-        const cornerRadius = 10;
+        // 绘制标题文字（使用特效）
+        this.drawTextWithEffect(
+          ctx,
+          titleConfig.text,
+          canvas.width / 2,
+          titleY,
+          titleFontSize,
+          titleConfig.textEffect || 'none',
+          titleConfig.effectColor || '#FFFFFF',
+          titleConfig.effectIntensity || 3,
+          titleConfig.fontFamily || 'sans-serif',
+          titleConfig.textColor || '#FFFFFF',
+          titleConfig.strokeWidth || 2.0
+        );
 
-        // 使用配置的背景色
-        ctx.fillStyle = titleConfig.backgroundColor;
-        ctx.beginPath();
-        ctx.moveTo(titleBackgroundX + cornerRadius, 80);
-        ctx.lineTo(titleBackgroundX + titleWidth - cornerRadius, 80);
-        ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80, titleBackgroundX + titleWidth, 80 + cornerRadius);
-        ctx.lineTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight - cornerRadius);
-        ctx.quadraticCurveTo(titleBackgroundX + titleWidth, 80 + titleBackgroundHeight, titleBackgroundX + titleWidth - cornerRadius, 80 + titleBackgroundHeight);
-        ctx.lineTo(titleBackgroundX + cornerRadius, 80 + titleBackgroundHeight);
-        ctx.quadraticCurveTo(titleBackgroundX, 80 + titleBackgroundHeight, titleBackgroundX, 80 + titleBackgroundHeight - cornerRadius);
-        ctx.lineTo(titleBackgroundX, 80 + cornerRadius);
-        ctx.quadraticCurveTo(titleBackgroundX, 80, titleBackgroundX + cornerRadius, 80);
-        ctx.closePath();
-        ctx.fill();
-
-        // 绘制标题文字
-        ctx.fillStyle = '#FFFFFF';
-        ctx.textAlign = 'center';
-        ctx.fillText(titleConfig.text, canvas.width / 2, 80 + titleHeight);
+        // 计算标题实际占用的高度，确保内容不重叠
+        const titleBottomY = titleY + (titleFontSize * 0.7) + (titleConfig.effectIntensity || 3) + 80;
+        const contentStartY = Math.max(titleBottomY, 200);
 
         return {
           canvas,
           ctx,
-          currentY: 80 + titleBackgroundHeight + 100,
-          contentStartY: 80 + titleBackgroundHeight + 100,
+          currentY: contentStartY,
+          contentStartY: contentStartY,
           linesOnPage: 0
         };
       } else {
@@ -2202,7 +2270,7 @@ export class ImageProcessor {
         
         // 绘制主题标题
         currentPage.ctx.font = 'bold 55px sans-serif';
-        currentPage.ctx.fillStyle = '#FFFFFF';
+        currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
         currentPage.ctx.textAlign = 'left';
         
         // 计算绘制主题需要的空间
@@ -2221,7 +2289,7 @@ export class ImageProcessor {
           
           // 在新页面上重新设置主题字体样式
           currentPage.ctx.font = 'bold 55px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
         }
         
@@ -2245,7 +2313,7 @@ export class ImageProcessor {
           currentPage.ctx.strokeStyle = '#FFFFFF';
           currentPage.ctx.stroke();
           
-          currentPage.currentY += 60;
+          currentPage.currentY += contentLineHeight;
           currentPage.linesOnPage++;
         });
         
@@ -2263,8 +2331,9 @@ export class ImageProcessor {
           console.log(`谨慎模式(切片背景)-处理主题 "${topic.topic}" 中的项目 ${currentItemIndex + 1}/${topic.items.length}: ${text.slice(0, 20)}...`);
           
           // 每次处理子项目前设置正确样式
-          currentPage.ctx.font = '45px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
           
           const lines = this.wrapText(currentPage.ctx, text, 45, 1082);
@@ -2281,8 +2350,9 @@ export class ImageProcessor {
             currentPage = await createNewPage();
             
             // 确保新页面上使用子项目的字体样式
-            currentPage.ctx.font = '45px sans-serif';
-            currentPage.ctx.fillStyle = '#FFFFFF';
+            const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+            currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
             currentPage.ctx.textAlign = 'left';
           }
 
@@ -2302,7 +2372,7 @@ export class ImageProcessor {
                 currentPage.currentY
               );
             }
-            currentPage.currentY += 60;
+            currentPage.currentY += contentLineHeight;
             currentPage.linesOnPage++;
           });
 
@@ -2323,7 +2393,7 @@ export class ImageProcessor {
       const calculateTextHeight = (ctx, text, fontSize, maxWidth) => {
         const lines = this.wrapText(ctx, text, fontSize, maxWidth);
         // 每行高度为60px，段落间距10px
-        return lines.length * 60 + 10; 
+        return lines.length * contentLineHeight + 10; 
       };
       
       while (currentTextIndex < processedContent.length) {
@@ -2331,8 +2401,9 @@ export class ImageProcessor {
         console.log(`谨慎模式-处理文本索引 ${currentTextIndex}, 内容: ${text.slice(0, 20)}...`);
         
         // 确保使用正确的字体样式
-        currentPage.ctx.font = '45px sans-serif';
-        currentPage.ctx.fillStyle = '#FFFFFF';
+        const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+        currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
         currentPage.ctx.textAlign = 'left';
         
         // 计算当前文本需要的高度
@@ -2346,8 +2417,9 @@ export class ImageProcessor {
           currentPage = await createNewPage();
           
           // 确保新页面上使用正确的字体样式
-          currentPage.ctx.font = '45px sans-serif';
-          currentPage.ctx.fillStyle = '#FFFFFF';
+          const contentFontSize = contentStyle?.fontSize || 45;
+      currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
           currentPage.ctx.textAlign = 'left';
         }
         
@@ -2370,7 +2442,7 @@ export class ImageProcessor {
               currentPage.currentY
             );
           }
-          currentPage.currentY += 60;
+          currentPage.currentY += contentLineHeight;
           currentPage.linesOnPage++;
         });
 
@@ -2394,8 +2466,17 @@ export class ImageProcessor {
     console.log(`开始整理封面图片，模式: ${coverMode}，提供了 ${coverImages ? coverImages.length : 0} 个文件对象`);
     
     if (!coverImages || coverImages.length === 0) {
-      console.log('没有提供封面图片，将使用空数组');
-      return [];
+      console.log('没有提供封面图片，创建默认黑色封面');
+      // 创建一个虚拟的黑色封面文件对象
+      const blackCoverFile = {
+        name: 'black_cover.png',
+        type: 'image/png',
+        size: 1024, // 虚拟大小
+        lastModified: Date.now(),
+        // 标记为黑色封面，用于后续识别
+        _isBlackCover: true
+      };
+      return [[blackCoverFile]]; // 返回包含一个黑色封面的组
     }
     
     // 输出前5个文件的详细属性，用于调试
@@ -2783,5 +2864,90 @@ export class ImageProcessor {
       const day = String(now.getDate()).padStart(2, '0');
       return `${year}-${month}-${day}`;
     }
+  }
+
+  // 文字特效绘制函数
+  static drawTextWithEffect(ctx, text, x, y, fontSize, effect, effectColor, intensity, fontFamily = 'sans-serif', textColor = '#FFFFFF', strokeWidth = 2.0) {
+    // 保存当前状态
+    ctx.save();
+    
+    // 设置基本字体
+    ctx.font = `${fontSize}px ${fontFamily}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    switch (effect) {
+      case 'stroke':
+        // 描边效果
+        ctx.strokeStyle = effectColor;
+        ctx.lineWidth = strokeWidth;
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = textColor;
+        ctx.fillText(text, x, y);
+        break;
+        
+      case 'shadow':
+        // 投影效果
+        const offsetX = intensity;
+        const offsetY = intensity;
+        ctx.fillStyle = effectColor;
+        ctx.fillText(text, x + offsetX, y + offsetY);
+        ctx.fillStyle = textColor;
+        ctx.fillText(text, x, y);
+        break;
+        
+      case 'gradient':
+        // 渐变效果
+        const gradient = ctx.createLinearGradient(x - 100, y - fontSize/2, x + 100, y + fontSize/2);
+        gradient.addColorStop(0, textColor);
+        gradient.addColorStop(0.5, effectColor);
+        gradient.addColorStop(1, textColor);
+        ctx.fillStyle = gradient;
+        ctx.fillText(text, x, y);
+        break;
+        
+      case 'glow':
+        // 发光效果
+        ctx.shadowColor = effectColor;
+        ctx.shadowBlur = intensity * 3;
+        ctx.fillStyle = textColor;
+        ctx.fillText(text, x, y);
+        // 重复绘制增强发光效果
+        ctx.fillText(text, x, y);
+        break;
+        
+      case '3d':
+        // 3D效果
+        const depth = intensity;
+        // 绘制多层偏移创建3D效果
+        for (let i = depth; i > 0; i--) {
+          const alpha = (depth - i + 1) / depth * 0.3;
+          ctx.fillStyle = `rgba(${parseInt(effectColor.slice(1, 3), 16)}, ${parseInt(effectColor.slice(3, 5), 16)}, ${parseInt(effectColor.slice(5, 7), 16)}, ${alpha})`;
+          ctx.fillText(text, x + i, y + i);
+        }
+        ctx.fillStyle = textColor;
+        ctx.fillText(text, x, y);
+        break;
+        
+      case 'neon':
+        // 霓虹效果
+        ctx.strokeStyle = effectColor;
+        ctx.lineWidth = intensity;
+        ctx.shadowColor = effectColor;
+        ctx.shadowBlur = intensity * 2;
+        ctx.strokeText(text, x, y);
+        ctx.fillStyle = textColor;
+        ctx.fillText(text, x, y);
+        break;
+        
+      default:
+        // 无特效
+        ctx.fillStyle = textColor;
+        ctx.fillText(text, x, y);
+        break;
+    }
+    
+    // 恢复状态
+    ctx.restore();
   }
 } 

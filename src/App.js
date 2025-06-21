@@ -9,7 +9,8 @@ function App() {
   const [files, setFiles] = useState({
     covers: [],
     backgrounds: [],
-    excel: null
+    excel: null,
+    productPromo: null // 添加产品宣传图
   });
   
   const [isProcessing, setIsProcessing] = useState(false);
@@ -22,13 +23,13 @@ function App() {
   });
 
   // 添加图片格式选择的 state
-  const [imageFormat, setImageFormat] = useState(localStorage.getItem('imageFormat') || 'jpg');
+  const [imageFormat, setImageFormat] = useState(localStorage.getItem('imageFormat') || 'jpeg');
   
   // 添加封面模式选择
   const [coverMode, setCoverMode] = useState(localStorage.getItem('coverMode') || 'single'); // single单图模式, multiple多图模式
   
   // 添加内页使用规则模式选择
-  const [pageMode, setPageMode] = useState(localStorage.getItem('pageMode') || 'flexible'); // flexible宽松模式, strict严谨模式, cautious谨慎模式
+  const [pageMode, setPageMode] = useState(localStorage.getItem('pageMode') || 'cautious'); // flexible宽松模式, strict严谨模式, cautious谨慎模式
   
   // 添加内页数量限制
   const [pageLimit, setPageLimit] = useState(parseInt(localStorage.getItem('pageLimit') || '0', 10)); // 0表示不限制
@@ -39,8 +40,17 @@ function App() {
   const [knowledgeExcel, setKnowledgeExcel] = useState(null); // 知识Excel文件
 
   // 添加内页素材切割模式
-  const [sliceMode, setSliceMode] = useState(localStorage.getItem('sliceMode') === 'true'); // 默认不启用切割模式
+  const [sliceMode, setSliceMode] = useState(localStorage.getItem('sliceMode') !== 'false'); // 默认启用切割模式
   const [sliceCount, setSliceCount] = useState(parseInt(localStorage.getItem('sliceCount') || '4', 10)); // 默认切割为4份(2x2)
+
+  // 添加起始序号配置
+  const [startIndex, setStartIndex] = useState(parseInt(localStorage.getItem('startIndex') || '1001', 10)); // 默认从1001开始
+
+  // 添加生成笔记份数配置（仅在无封面图时使用）
+  const [noteCount, setNoteCount] = useState(parseInt(localStorage.getItem('noteCount') || '1', 10)); // 默认生成1份
+
+  // 添加产品宣传图配置
+  const [promoPosition, setPromoPosition] = useState(parseInt(localStorage.getItem('promoPosition') || '3', 10)); // 默认插入到内页3位置
 
   // 添加更多设置展开/收起状态
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
@@ -48,13 +58,60 @@ function App() {
   // 在state中添加标题配置
   const [titleConfig, setTitleConfig] = useState({
     text: localStorage.getItem('titleText') || '随机标题',
-    backgroundColor: localStorage.getItem('titleBackground') || '#0D6CD7'
+    fontSize: parseInt(localStorage.getItem('titleFontSize') || '80', 10),
+    textColor: localStorage.getItem('titleTextColor') || '#FFFFFF',
+    textEffect: localStorage.getItem('titleTextEffect') || 'none',
+    effectColor: localStorage.getItem('titleEffectColor') || '#FFFFFF',
+    effectIntensity: parseInt(localStorage.getItem('titleEffectIntensity') || '3', 10),
+    strokeWidth: parseFloat(localStorage.getItem('titleStrokeWidth') || '2.0'),
+    fontFamily: localStorage.getItem('titleFontFamily') || 'PingFang SC, Microsoft YaHei, sans-serif'
   });
+
+  // 添加内容文字样式配置
+  const [contentStyle, setContentStyle] = useState({
+    fontSize: parseInt(localStorage.getItem('contentFontSize') || '45', 10),
+    color: localStorage.getItem('contentColor') || '#333333',
+    fontFamily: localStorage.getItem('contentFontFamily') || 'PingFang SC, Microsoft YaHei, sans-serif',
+    lineHeight: parseFloat(localStorage.getItem('contentLineHeight') || '1.6')
+  });
+
+  // 定义可用的字体列表
+  const availableFonts = [
+    { value: 'PingFang SC, Microsoft YaHei, sans-serif', label: '苹方/微软雅黑（默认）' },
+    { value: 'Noto Sans CJK SC, sans-serif', label: '思源黑体' },
+    { value: 'Noto Serif CJK SC, serif', label: '思源宋体' },
+    { value: 'Source Han Sans CN, sans-serif', label: '思源黑体 CN' },
+    { value: 'Source Han Serif CN, serif', label: '思源宋体 CN' },
+    { value: 'Alibaba PuHuiTi, sans-serif', label: '阿里巴巴普惠体' },
+    { value: 'DingTalk JinBuTi, sans-serif', label: '钉钉进步体' },
+    { value: 'Zcool XiaoWei, sans-serif', label: '站酷小薇' },
+    { value: 'Zcool KuaiLe, sans-serif', label: '站酷快乐体' },
+    { value: 'Zcool QingKe HuangYou, sans-serif', label: '站酷庆科黄油体' },
+    { value: 'FangSong, STFangSong, serif', label: '仿宋' },
+    { value: 'KaiTi, STKaiti, serif', label: '楷体' },
+    { value: 'SimSun, STSong, serif', label: '宋体' },
+    { value: 'SimHei, STHeiti, sans-serif', label: '黑体' },
+    { value: 'Microsoft YaHei, sans-serif', label: '微软雅黑' },
+    { value: 'STSong, SimSun, serif', label: '华文宋体' },
+    { value: 'STHeiti, SimHei, sans-serif', label: '华文黑体' },
+    { value: 'STKaiti, KaiTi, serif', label: '华文楷体' },
+    { value: 'STFangsong, FangSong, serif', label: '华文仿宋' },
+    { value: 'WenQuanYi Micro Hei, sans-serif', label: '文泉驿微米黑' },
+    { value: 'WenQuanYi Zen Hei, sans-serif', label: '文泉驿正黑' },
+    { value: 'Arial, sans-serif', label: 'Arial' },
+    { value: 'Times New Roman, serif', label: 'Times New Roman' },
+    { value: 'Georgia, serif', label: 'Georgia' },
+    { value: 'Verdana, sans-serif', label: 'Verdana' },
+    { value: 'Tahoma, sans-serif', label: 'Tahoma' },
+    { value: 'Courier New, monospace', label: 'Courier New' },
+    { value: 'Impact, sans-serif', label: 'Impact' },
+    { value: 'Comic Sans MS, cursive', label: 'Comic Sans MS' }
+  ];
 
   const [resetDownloadStatus, setResetDownloadStatus] = useState(false);
 
   // 在state中添加topicMode状态
-  const [topicMode, setTopicMode] = useState(localStorage.getItem('topicMode') === 'true'); // 添加主题模式状态
+  const [topicMode, setTopicMode] = useState(false); // 添加主题模式状态，默认不勾选
 
   // 在组件加载时检查是否有保存的Excel文件和文件名
   useEffect(() => {
@@ -62,11 +119,8 @@ function App() {
     const savedExcel = localStorage.getItem('savedExcel');
     const savedExcelName = localStorage.getItem('savedExcelName');
     
-    // 加载保存的标题配置
-    const savedTitleConfig = localStorage.getItem('titleConfig');
-    if (savedTitleConfig) {
-      setTitleConfig(JSON.parse(savedTitleConfig));
-    }
+    // 加载保存的标题配置（移除旧的JSON格式加载）
+    // 标题配置和内容样式配置已经在state初始化时从localStorage加载了
     
     if (savedExcel && savedExcelName) {
       try {
@@ -86,7 +140,7 @@ function App() {
     setFiles(prev => {
       const newFiles = {
         ...prev,
-        [type]: type === 'excel' ? selectedFiles[0] : selectedFiles
+        [type]: (type === 'excel' || type === 'productPromo') ? selectedFiles[0] : selectedFiles
       };
 
       // 如果是Excel文件，保存到localStorage
@@ -119,6 +173,10 @@ function App() {
     setFiles(prev => ({ ...prev, excel: null }));
     localStorage.removeItem('savedExcel');
     localStorage.removeItem('savedExcelName');
+  };
+
+  const handleClearProductPromo = () => {
+    setFiles(prev => ({ ...prev, productPromo: null }));
   };
 
   const validateFiles = () => {
@@ -265,6 +323,17 @@ function App() {
       }
     }
     
+    // 检查无封面图情况下的生成笔记份数设置
+    if (!files.covers || files.covers.length === 0) {
+      console.log("检查无封面图模式的生成笔记份数设置");
+      if (noteCount < 1 || noteCount > 50) {
+        console.log("错误: 生成笔记份数必须在1-50之间");
+        setValidationMessage('生成笔记份数必须在1-50之间');
+        return false;
+      }
+      console.log(`无封面图模式: 将生成 ${noteCount} 份笔记`);
+    }
+    
     console.log("文件验证通过");
     return true;
   };
@@ -314,7 +383,12 @@ function App() {
         sliceMode,
         sliceCount,
         coverMode,
-        topicMode
+        topicMode,
+        contentStyle,
+        startIndex,
+        noteCount,
+        files.productPromo,
+        promoPosition
       );
 
       console.log("处理结果:", result);
@@ -361,6 +435,7 @@ function App() {
       ...prev,
       covers: [],
       backgrounds: [],
+      productPromo: null,
       // 不清除excel文件
     }));
     setIsProcessing(false);
@@ -377,7 +452,23 @@ function App() {
   const handleTitleConfigChange = (newConfig) => {
     setTitleConfig(newConfig);
     // 保存到localStorage
-    localStorage.setItem('titleConfig', JSON.stringify(newConfig));
+    localStorage.setItem('titleText', newConfig.text);
+    localStorage.setItem('titleFontSize', newConfig.fontSize.toString());
+    localStorage.setItem('titleTextColor', newConfig.textColor);
+    localStorage.setItem('titleTextEffect', newConfig.textEffect);
+    localStorage.setItem('titleEffectColor', newConfig.effectColor);
+    localStorage.setItem('titleEffectIntensity', newConfig.effectIntensity.toString());
+    localStorage.setItem('titleStrokeWidth', newConfig.strokeWidth.toString());
+    localStorage.setItem('titleFontFamily', newConfig.fontFamily);
+  };
+
+  // 添加内容样式配置的处理函数
+  const handleContentStyleChange = (newStyle) => {
+    setContentStyle(newStyle);
+    localStorage.setItem('contentFontSize', newStyle.fontSize.toString());
+    localStorage.setItem('contentColor', newStyle.color);
+    localStorage.setItem('contentFontFamily', newStyle.fontFamily);
+    localStorage.setItem('contentLineHeight', newStyle.lineHeight.toString());
   };
 
   // 处理封面图上传
@@ -590,6 +681,36 @@ function App() {
                 onClear={handleClearExcel}
               />
             </div>
+
+            <div className="upload-column">
+              <h3>产品宣传图</h3>
+              <FileUploader 
+                type="productPromo" 
+                onFilesSelected={handleFilesSelected}
+                files={files.productPromo ? [files.productPromo] : []}
+                onClear={handleClearProductPromo}
+                accept="image/*"
+                title="产品宣传图（可选）"
+              />
+              <div className="promo-config">
+                <label>插入到内页位置：</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={promoPosition}
+                  onChange={(e) => {
+                    const value = Math.min(50, Math.max(1, parseInt(e.target.value) || 3));
+                    setPromoPosition(value);
+                    localStorage.setItem('promoPosition', value);
+                  }}
+                  className="promo-position-input"
+                />
+                <span className="promo-description">
+                  宣传图将插入到内页{promoPosition}位置，后续内页自动顺延
+                </span>
+              </div>
+            </div>
           </div>
 
           <div className="config-section">
@@ -608,133 +729,213 @@ function App() {
                     placeholder="请输入标题文本"
                   />
                 </div>
+
                 <div className="input-group">
-                  <label>背景颜色:</label>
+                  <label>标题字体大小:</label>
                   <input
-                    type="color"
-                    value={titleConfig.backgroundColor}
+                    type="number"
+                    min="20"
+                    max="100"
+                    value={titleConfig.fontSize}
                     onChange={(e) => handleTitleConfigChange({
                       ...titleConfig,
-                      backgroundColor: e.target.value
+                      fontSize: parseInt(e.target.value) || 50
                     })}
                   />
-                  <span className="color-display">{titleConfig.backgroundColor}</span>
+                  <span className="font-size-unit">px</span>
+                </div>
+                <div className="input-group">
+                  <label>标题文字颜色:</label>
+                  <input
+                    type="color"
+                    value={titleConfig.textColor}
+                    onChange={(e) => handleTitleConfigChange({
+                      ...titleConfig,
+                      textColor: e.target.value
+                    })}
+                  />
+                  <span className="color-display">{titleConfig.textColor}</span>
+                </div>
+                <div className="input-group">
+                  <label>标题字体:</label>
+                  <select
+                    value={titleConfig.fontFamily}
+                    onChange={(e) => handleTitleConfigChange({
+                      ...titleConfig,
+                      fontFamily: e.target.value
+                    })}
+                  >
+                    {availableFonts.map(font => (
+                      <option key={font.value} value={font.value}>
+                        {font.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="font-preview-tip">
+                    提示：标题字体将应用于内页标题
+                  </div>
+                </div>
+                <div className="input-group">
+                  <label>文字特效:</label>
+                  <select
+                    value={titleConfig.textEffect}
+                    onChange={(e) => handleTitleConfigChange({
+                      ...titleConfig,
+                      textEffect: e.target.value
+                    })}
+                  >
+                    <option value="none">无特效</option>
+                    <option value="stroke">描边</option>
+                    <option value="shadow">投影</option>
+                    <option value="gradient">渐变</option>
+                    <option value="glow">发光</option>
+                    <option value="3d">3D效果</option>
+                    <option value="neon">霓虹</option>
+                  </select>
+                </div>
+                {titleConfig.textEffect !== 'none' && (
+                  <>
+                    <div className="input-group">
+                      <label>特效颜色:</label>
+                      <input
+                        type="color"
+                        value={titleConfig.effectColor}
+                        onChange={(e) => handleTitleConfigChange({
+                          ...titleConfig,
+                          effectColor: e.target.value
+                        })}
+                      />
+                      <span className="color-display">{titleConfig.effectColor}</span>
+                    </div>
+                    <div className="input-group">
+                      <label>特效强度:</label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        value={titleConfig.effectIntensity}
+                        onChange={(e) => handleTitleConfigChange({
+                          ...titleConfig,
+                          effectIntensity: parseInt(e.target.value)
+                        })}
+                      />
+                      <span className="effect-intensity-display">{titleConfig.effectIntensity}</span>
+                    </div>
+                    {titleConfig.textEffect === 'stroke' && (
+                      <div className="input-group">
+                        <label>描边粗细:</label>
+                        <input
+                          type="number"
+                          min="0.5"
+                          max="10.0"
+                          step="0.5"
+                          value={titleConfig.strokeWidth}
+                          onChange={(e) => handleTitleConfigChange({
+                            ...titleConfig,
+                            strokeWidth: parseFloat(e.target.value) || 2.0
+                          })}
+                        />
+                        <span className="stroke-width-unit">px</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="content-style-config">
+              <h3>内容文字样式设置</h3>
+              <div className="content-style-inputs">
+                <div className="input-group">
+                  <label>字体大小:</label>
+                  <input
+                    type="number"
+                    min="20"
+                    max="80"
+                    value={contentStyle.fontSize}
+                    onChange={(e) => handleContentStyleChange({
+                      ...contentStyle,
+                      fontSize: parseInt(e.target.value) || 45
+                    })}
+                  />
+                  <span className="font-size-unit">px</span>
+                </div>
+                <div className="input-group">
+                  <label>文字颜色:</label>
+                  <input
+                    type="color"
+                    value={contentStyle.color}
+                    onChange={(e) => handleContentStyleChange({
+                      ...contentStyle,
+                      color: e.target.value
+                    })}
+                  />
+                  <span className="color-display">{contentStyle.color}</span>
+                </div>
+                <div className="input-group">
+                  <label>字体:</label>
+                  <select
+                    value={contentStyle.fontFamily}
+                    onChange={(e) => handleContentStyleChange({
+                      ...contentStyle,
+                      fontFamily: e.target.value
+                    })}
+                  >
+                    {availableFonts.map(font => (
+                      <option key={font.value} value={font.value}>
+                        {font.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="font-preview-tip">
+                    提示：内容字体将应用于内页正文内容
+                  </div>
+                </div>
+                <div className="input-group">
+                  <label>行间距:</label>
+                  <input
+                    type="number"
+                    min="1.0"
+                    max="3.0"
+                    step="0.1"
+                    value={contentStyle.lineHeight}
+                    onChange={(e) => handleContentStyleChange({
+                      ...contentStyle,
+                      lineHeight: parseFloat(e.target.value) || 1.6
+                    })}
+                  />
+                  <span className="line-height-unit">倍</span>
                 </div>
               </div>
             </div>
 
-            {/* 添加图片格式选择 */}
-            <div className="format-config">
-              <h3>输出设置</h3>
-              <div className="format-inputs">
-                <div className="format-section">
-                  <h4>图片格式</h4>
-                  <label>
-                    <input
-                      type="radio"
-                      name="imageFormat"
-                      value="jpeg"
-                      checked={imageFormat === 'jpeg'}
-                      onChange={() => setImageFormat('jpeg')}
-                    />
-                    JPG格式
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="imageFormat"
-                      value="png"
-                      checked={imageFormat === 'png'}
-                      onChange={() => setImageFormat('png')}
-                    />
-                    PNG格式
-                  </label>
+            {/* 生成笔记份数设置（仅在无封面图时显示） */}
+            {(!files.covers || files.covers.length === 0) && (
+              <div className="note-count-config">
+                <h3>生成笔记份数</h3>
+                <div className="input-group">
+                  <label>笔记份数：</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={noteCount}
+                    onChange={(e) => {
+                      const value = Math.min(50, Math.max(1, parseInt(e.target.value) || 1));
+                      setNoteCount(value);
+                      localStorage.setItem('noteCount', value);
+                    }}
+                    className="note-count-input"
+                  />
+                  <span className="note-count-description">
+                    生成 {noteCount} 份完整的图片（无封面图模式）
+                  </span>
                 </div>
-
-                <div className="format-section">
-                  <h4>内页模式</h4>
-                  <label>
-                    <input
-                      type="radio"
-                      name="pageMode"
-                      value="flexible"
-                      checked={pageMode === 'flexible'}
-                      onChange={() => setPageMode('flexible')}
-                    />
-                    宽松模式
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="pageMode"
-                      value="strict"
-                      checked={pageMode === 'strict'}
-                      onChange={() => setPageMode('strict')}
-                    />
-                    严谨模式
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="pageMode"
-                      value="cautious"
-                      checked={pageMode === 'cautious'}
-                      onChange={() => setPageMode('cautious')}
-                    />
-                    谨慎模式
-                  </label>
-                  <div className="mode-description">
-                    {pageMode === 'flexible' && '宽松模式：背景图可重复使用，不受素材数量限制'}
-                    {pageMode === 'strict' && '严谨模式：每个背景图只使用一次，需要足够的素材'}
-                    {pageMode === 'cautious' && '谨慎模式：基于严谨模式，但只有第一页显示标题'}
-                  </div>
-                </div>
-
-                <div className="format-section">
-                  <h4>主题模式</h4>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={topicMode}
-                      onChange={(e) => {
-                        setTopicMode(e.target.checked);
-                        localStorage.setItem('topicMode', e.target.checked);
-                      }}
-                    />
-                    启用主题模式
-                  </label>
-                  <div className="mode-description">
-                    主题模式：将Excel中的每个工作表作为一个主题，实现主题分组展示
-                    {topicMode && <div style={{marginTop: '5px', color: '#faad14'}}>
-                      <strong>注意：</strong> 开启此选项时，请确保Excel文件包含多个工作表，每个工作表对应一个主题。
-                    </div>}
-                  </div>
-                </div>
-
-                <div className="page-limit-section">
-                  <h4>内页数量限制</h4>
-                  <div className="input-group">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={pageLimit}
-                      onChange={(e) => {
-                        // 确保输入值在 0-100 之间
-                        const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
-                        setPageLimit(value);
-                      }}
-                      className="page-limit-input"
-                    />
-                    <span className="page-limit-description">
-                      {pageLimit === 0 
-                        ? '默认值0：不限制内页数量' 
-                        : `限制为 ${pageLimit} 页，超出时会保留首尾页`}
-                    </span>
-                  </div>
+                <div className="mode-description">
+                  无封面图模式：内页将从"内页1"开始命名，可生成多份相同的图片内容
                 </div>
               </div>
-            </div>
+            )}
 
             {/* 更多设置区域 */}
             <div className="advanced-settings">
@@ -745,6 +946,117 @@ function App() {
               
               {showAdvancedSettings && (
                 <div className="advanced-content">
+                  {/* 输出设置 */}
+                  <div className="output-config">
+                    <h4>输出设置</h4>
+                    <div className="format-section">
+                      <h5>图片格式</h5>
+                      <label>
+                        <input
+                          type="radio"
+                          name="imageFormat"
+                          value="jpeg"
+                          checked={imageFormat === 'jpeg'}
+                          onChange={() => setImageFormat('jpeg')}
+                        />
+                        JPG格式
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="imageFormat"
+                          value="png"
+                          checked={imageFormat === 'png'}
+                          onChange={() => setImageFormat('png')}
+                        />
+                        PNG格式
+                      </label>
+                    </div>
+
+                    <div className="format-section">
+                      <h5>内页模式</h5>
+                      <label>
+                        <input
+                          type="radio"
+                          name="pageMode"
+                          value="flexible"
+                          checked={pageMode === 'flexible'}
+                          onChange={() => setPageMode('flexible')}
+                        />
+                        宽松模式
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="pageMode"
+                          value="strict"
+                          checked={pageMode === 'strict'}
+                          onChange={() => setPageMode('strict')}
+                        />
+                        严谨模式
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="pageMode"
+                          value="cautious"
+                          checked={pageMode === 'cautious'}
+                          onChange={() => setPageMode('cautious')}
+                        />
+                        谨慎模式
+                      </label>
+                      <div className="mode-description">
+                        {pageMode === 'flexible' && '宽松模式：背景图可重复使用，不受素材数量限制'}
+                        {pageMode === 'strict' && '严谨模式：每个背景图只使用一次，需要足够的素材'}
+                        {pageMode === 'cautious' && '谨慎模式：基于严谨模式，但只有第一页显示标题'}
+                      </div>
+                    </div>
+
+                    <div className="format-section">
+                      <h5>主题模式</h5>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={topicMode}
+                          onChange={(e) => {
+                            setTopicMode(e.target.checked);
+                            localStorage.setItem('topicMode', e.target.checked);
+                          }}
+                        />
+                        启用主题模式
+                      </label>
+                      <div className="mode-description">
+                        主题模式：将Excel中的每个工作表作为一个主题，实现主题分组展示
+                        {topicMode && <div style={{marginTop: '5px', color: '#faad14'}}>
+                          <strong>注意：</strong> 开启此选项时，请确保Excel文件包含多个工作表，每个工作表对应一个主题。
+                        </div>}
+                      </div>
+                    </div>
+
+                    <div className="page-limit-section">
+                      <h5>内页数量限制</h5>
+                      <div className="input-group">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={pageLimit}
+                          onChange={(e) => {
+                            // 确保输入值在 0-100 之间
+                            const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                            setPageLimit(value);
+                          }}
+                          className="page-limit-input"
+                        />
+                        <span className="page-limit-description">
+                          {pageLimit === 0 
+                            ? '默认值0：不限制内页数量' 
+                            : `限制为 ${pageLimit} 页，超出时会保留首尾页`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* 知识拼接模式 */}
                   <div className="knowledge-config">
                     <h4>知识拼接模式</h4>
@@ -800,6 +1112,31 @@ function App() {
                     )}
                   </div>
                   
+                  {/* 文件夹序号设置 */}
+                  <div className="folder-index-config">
+                    <h4>文件夹序号设置</h4>
+                    <div className="input-group">
+                      <label>起始序号：</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="9999"
+                        value={startIndex}
+                        onChange={(e) => {
+                          const value = Math.min(9999, Math.max(1, parseInt(e.target.value) || 1001));
+                          setStartIndex(value);
+                          localStorage.setItem('startIndex', value);
+                        }}
+                        className="start-index-input"
+                      />
+                      <span className="start-index-description">
+                        文件夹将从此序号开始命名（如：{String(startIndex).padStart(4, '0')}）
+                      </span>
+                    </div>
+                  </div>
+
+
+
                   {/* 内页素材切割模式 */}
                   <div className="slice-config">
                     <h4>内页素材切割</h4>

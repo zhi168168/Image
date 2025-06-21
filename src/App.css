@@ -665,4 +665,317 @@ body {
   vertical-align: middle;
   display: inline-block;
 }
+
+/* 内容样式配置区域 */
+.content-style-config {
+  margin-bottom: 20px;
+  padding: 15px;
+  background: rgba(0,0,0,0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+.content-style-config h3 {
+  font-size: 18px;
+  margin-bottom: 15px;
+  color: #fff;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 8px;
+  font-weight: 500;
+}
+
+.content-style-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+}
+
+.content-style-inputs .input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.content-style-inputs .input-group label {
+  min-width: 100px;
+  font-size: 14px;
+  color: rgba(255,255,255,0.9);
+}
+
+.content-style-inputs .input-group input[type="number"] {
+  width: 80px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  background: rgba(0,0,0,0.3);
+  color: #fff;
+  font-size: 14px;
+}
+
+.content-style-inputs .input-group select {
+  min-width: 200px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  background: rgba(0,0,0,0.3);
+  color: #fff;
+  font-size: 14px;
+}
+
+.content-style-inputs .input-group select option {
+  background: #2d2d2d;
+  color: #fff;
+}
+
+.font-size-unit {
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  margin-left: 5px;
+}
+
+.line-height-unit {
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  margin-left: 5px;
+}
+
+.stroke-width-unit {
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  margin-left: 5px;
+}
+
+/* 文字特效控件样式 */
+.input-group select {
+  min-width: 150px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  background: rgba(0,0,0,0.3);
+  color: #fff;
+  font-size: 14px;
+}
+
+.input-group select option {
+  background: #2d2d2d;
+  color: #fff;
+}
+
+.input-group input[type="range"] {
+  width: 120px;
+  margin: 0 10px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.2);
+  outline: none;
+}
+
+.input-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #1890ff;
+  cursor: pointer;
+}
+
+.input-group input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #1890ff;
+  cursor: pointer;
+  border: none;
+}
+
+.effect-intensity-display {
+  font-size: 12px;
+  color: rgba(255,255,255,0.7);
+  min-width: 20px;
+  text-align: center;
+  padding: 2px 6px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+/* 字体选择器样式优化 */
+.input-group select[value*="Noto"] {
+  font-family: 'Noto Sans CJK SC', sans-serif;
+}
+
+.input-group select[value*="Source Han"] {
+  font-family: 'Source Han Sans CN', sans-serif;
+}
+
+.input-group select[value*="Alibaba"] {
+  font-family: 'Alibaba PuHuiTi', sans-serif;
+}
+
+.input-group select[value*="DingTalk"] {
+  font-family: 'DingTalk JinBuTi', sans-serif;
+}
+
+.input-group select[value*="Zcool"] {
+  font-family: 'Zcool XiaoWei', sans-serif;
+}
+
+.input-group select[value*="SimSun"] {
+  font-family: 'SimSun', serif;
+}
+
+.input-group select[value*="SimHei"] {
+  font-family: 'SimHei', sans-serif;
+}
+
+.input-group select[value*="KaiTi"] {
+  font-family: 'KaiTi', serif;
+}
+
+.input-group select[value*="FangSong"] {
+  font-family: 'FangSong', serif;
+}
+
+/* 字体预览提示 */
+.font-preview-tip {
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  margin-top: 5px;
+  font-style: italic;
+}
+
+/* 文件夹序号设置样式 */
+.folder-index-config {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  border: 1px solid #e9ecef;
+}
+
+.folder-index-config h4 {
+  color: #495057;
+  margin-bottom: 15px;
+  font-weight: 600;
+}
+
+.start-index-input {
+  width: 120px;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 16px;
+  text-align: center;
+}
+
+.start-index-description {
+  margin-left: 10px;
+  color: #666;
+  font-size: 14px;
+}
+
+/* 输出设置样式 */
+.output-config {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  border: 1px solid #e9ecef;
+}
+
+.output-config h4 {
+  color: #495057;
+  margin-bottom: 15px;
+  font-weight: 600;
+}
+
+.output-config h5 {
+  color: #495057;
+  margin-bottom: 10px;
+  margin-top: 15px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.output-config h5:first-of-type {
+  margin-top: 0;
+}
+
+/* 调整生成笔记份数样式，使其与其他配置区域统一 */
+.note-count-config {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  border: 1px solid #e9ecef;
+}
+
+.note-count-config h3 {
+  color: #495057;
+  margin-bottom: 15px;
+  font-weight: 600;
+}
+
+.note-count-input {
+  width: 120px;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 16px;
+  text-align: center;
+}
+
+.note-count-description {
+  margin-left: 10px;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.note-count-config .mode-description {
+  margin-top: 10px;
+  padding: 10px;
+  background: #fff;
+  border-radius: 4px;
+  color: #666;
+  font-size: 13px;
+  border: 1px solid #e9ecef;
+}
+
+/* 产品宣传图配置样式 */
+.promo-config {
+  margin-top: 15px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.promo-config label {
+  display: block;
+  margin-bottom: 8px;
+  color: #495057;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.promo-position-input {
+  width: 80px;
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 16px;
+  text-align: center;
+  margin-right: 10px;
+}
+
+.promo-description {
+  color: #666;
+  font-size: 13px;
+  font-weight: 500;
+}
  
