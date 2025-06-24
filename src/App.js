@@ -23,56 +23,79 @@ function App() {
   });
 
   // 添加图片格式选择的 state
-  const [imageFormat, setImageFormat] = useState(localStorage.getItem('imageFormat') || 'jpeg');
+  const [imageFormat, setImageFormat] = useState(() => {
+    return localStorage.getItem('imageFormat') || 'jpeg';
+  });
   
   // 添加封面模式选择
-  const [coverMode, setCoverMode] = useState(localStorage.getItem('coverMode') || 'single'); // single单图模式, multiple多图模式
+  const [coverMode, setCoverMode] = useState(() => {
+    return localStorage.getItem('coverMode') || 'single';
+  }); // single单图模式, multiple多图模式
   
   // 添加内页使用规则模式选择
-  const [pageMode, setPageMode] = useState(localStorage.getItem('pageMode') || 'cautious'); // flexible宽松模式, strict严谨模式, cautious谨慎模式
+  const [pageMode, setPageMode] = useState(() => {
+    return localStorage.getItem('pageMode') || 'cautious';
+  }); // flexible宽松模式, strict严谨模式, cautious谨慎模式
   
   // 添加内页数量限制
-  const [pageLimit, setPageLimit] = useState(parseInt(localStorage.getItem('pageLimit') || '0', 10)); // 0表示不限制
+  const [pageLimit, setPageLimit] = useState(0);
   
   // 添加知识拼接模式
-  const [knowledgeMode, setKnowledgeMode] = useState(localStorage.getItem('knowledgeMode') === 'true'); // 默认不启用知识拼接模式
-  const [knowledgeCount, setKnowledgeCount] = useState(parseInt(localStorage.getItem('knowledgeCount') || '5', 10)); // 每份文件需要的知识图片数量，0表示不需要
+  const [knowledgeMode, setKnowledgeMode] = useState(false);
+  const [knowledgeCount, setKnowledgeCount] = useState(5);
   const [knowledgeExcel, setKnowledgeExcel] = useState(null); // 知识Excel文件
 
   // 添加内页素材切割模式
-  const [sliceMode, setSliceMode] = useState(localStorage.getItem('sliceMode') !== 'false'); // 默认启用切割模式
-  const [sliceCount, setSliceCount] = useState(parseInt(localStorage.getItem('sliceCount') || '4', 10)); // 默认切割为4份(2x2)
+  const [sliceMode, setSliceMode] = useState(() => {
+    const saved = localStorage.getItem('sliceMode');
+    return saved !== null ? saved === 'true' : true; // 默认启用切割模式
+  }); // 默认启用切割模式
+  const [sliceCount, setSliceCount] = useState(() => {
+    return parseInt(localStorage.getItem('sliceCount') || '4');
+  }); // 默认切割为4份(2x2)
 
   // 添加起始序号配置
-  const [startIndex, setStartIndex] = useState(parseInt(localStorage.getItem('startIndex') || '1001', 10)); // 默认从1001开始
+  const [startIndex, setStartIndex] = useState(() => {
+    return parseInt(localStorage.getItem('startIndex') || '1001');
+  }); // 默认从1001开始
 
   // 添加生成笔记份数配置（仅在无封面图时使用）
-  const [noteCount, setNoteCount] = useState(parseInt(localStorage.getItem('noteCount') || '1', 10)); // 默认生成1份
+  const [noteCount, setNoteCount] = useState(() => {
+    return parseInt(localStorage.getItem('noteCount') || '1');
+  }); // 默认生成1份
 
   // 添加产品宣传图配置
-  const [promoPosition, setPromoPosition] = useState(parseInt(localStorage.getItem('promoPosition') || '3', 10)); // 默认插入到内页3位置
+  const [promoPosition, setPromoPosition] = useState(() => {
+    return parseInt(localStorage.getItem('promoPosition') || '3');
+  }); // 默认插入到内页3位置
 
   // 添加更多设置展开/收起状态
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
 
   // 在state中添加标题配置
-  const [titleConfig, setTitleConfig] = useState({
-    text: localStorage.getItem('titleText') || '随机标题',
-    fontSize: parseInt(localStorage.getItem('titleFontSize') || '80', 10),
-    textColor: localStorage.getItem('titleTextColor') || '#FFFFFF',
-    textEffect: localStorage.getItem('titleTextEffect') || 'none',
-    effectColor: localStorage.getItem('titleEffectColor') || '#FFFFFF',
-    effectIntensity: parseInt(localStorage.getItem('titleEffectIntensity') || '3', 10),
-    strokeWidth: parseFloat(localStorage.getItem('titleStrokeWidth') || '2.0'),
-    fontFamily: localStorage.getItem('titleFontFamily') || 'PingFang SC, Microsoft YaHei, sans-serif'
+  const [titleConfig, setTitleConfig] = useState(() => {
+    const saved = localStorage.getItem('titleConfig');
+    return saved ? JSON.parse(saved) : {
+      text: '',
+      fontSize: 80,
+      textEffect: 'none',
+      effectColor: '#FFFFFF',
+      effectIntensity: 3,
+      fontFamily: 'sans-serif',
+      textColor: '#FFFFFF',
+      strokeWidth: 2.0
+    };
   });
 
   // 添加内容文字样式配置
-  const [contentStyle, setContentStyle] = useState({
-    fontSize: parseInt(localStorage.getItem('contentFontSize') || '45', 10),
-    color: localStorage.getItem('contentColor') || '#333333',
-    fontFamily: localStorage.getItem('contentFontFamily') || 'PingFang SC, Microsoft YaHei, sans-serif',
-    lineHeight: parseFloat(localStorage.getItem('contentLineHeight') || '1.6')
+  const [contentStyle, setContentStyle] = useState(() => {
+    const saved = localStorage.getItem('contentStyle');
+    return saved ? JSON.parse(saved) : {
+      fontSize: 45,
+      textColor: '#FFFFFF',
+      fontFamily: 'sans-serif',
+      lineHeight: 1.6
+    };
   });
 
   // 定义可用的字体列表
@@ -111,7 +134,10 @@ function App() {
   const [resetDownloadStatus, setResetDownloadStatus] = useState(false);
 
   // 在state中添加topicMode状态
-  const [topicMode, setTopicMode] = useState(false); // 添加主题模式状态，默认不勾选
+  const [topicMode, setTopicMode] = useState(() => {
+    const saved = localStorage.getItem('topicMode');
+    return saved !== null ? saved === 'true' : false; // 默认不勾选主题模式
+  }); // 添加主题模式状态，默认不勾选
 
   // 在组件加载时检查是否有保存的Excel文件和文件名
   useEffect(() => {
@@ -452,23 +478,13 @@ function App() {
   const handleTitleConfigChange = (newConfig) => {
     setTitleConfig(newConfig);
     // 保存到localStorage
-    localStorage.setItem('titleText', newConfig.text);
-    localStorage.setItem('titleFontSize', newConfig.fontSize.toString());
-    localStorage.setItem('titleTextColor', newConfig.textColor);
-    localStorage.setItem('titleTextEffect', newConfig.textEffect);
-    localStorage.setItem('titleEffectColor', newConfig.effectColor);
-    localStorage.setItem('titleEffectIntensity', newConfig.effectIntensity.toString());
-    localStorage.setItem('titleStrokeWidth', newConfig.strokeWidth.toString());
-    localStorage.setItem('titleFontFamily', newConfig.fontFamily);
+    localStorage.setItem('titleConfig', JSON.stringify(newConfig));
   };
 
   // 添加内容样式配置的处理函数
   const handleContentStyleChange = (newStyle) => {
     setContentStyle(newStyle);
-    localStorage.setItem('contentFontSize', newStyle.fontSize.toString());
-    localStorage.setItem('contentColor', newStyle.color);
-    localStorage.setItem('contentFontFamily', newStyle.fontFamily);
-    localStorage.setItem('contentLineHeight', newStyle.lineHeight.toString());
+    localStorage.setItem('contentStyle', JSON.stringify(newStyle));
   };
 
   // 处理封面图上传
@@ -617,6 +633,29 @@ function App() {
     }
   };
 
+  // Toast状态
+  const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
+
+  // 显示Toast的函数
+  const showToast = (message, type = 'info') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => {
+      setToast({ show: false, message: '', type: 'info' });
+    }, 5000); // 5秒后自动隐藏
+  };
+
+  // 监听来自imageProcessor的toast事件
+  useEffect(() => {
+    const handleShowToast = (event) => {
+      showToast(event.detail.message, event.detail.type);
+    };
+    
+    window.addEventListener('showToast', handleShowToast);
+    return () => {
+      window.removeEventListener('showToast', handleShowToast);
+    };
+  }, []);
+
   return (
     <div className="app">
       <header className="app-header">
@@ -659,6 +698,34 @@ function App() {
                 multiple={coverMode === 'multiple'}
                 directory={coverMode === 'multiple'}
               />
+              
+              {/* 生成笔记份数设置（仅在无封面图时显示） */}
+              {(!files.covers || files.covers.length === 0) && (
+                <div className="note-count-config" style={{ marginTop: '15px' }}>
+                  <h4>生成笔记份数</h4>
+                  <div className="input-group">
+                    <label>笔记份数：</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      value={noteCount}
+                      onChange={(e) => {
+                        const value = Math.min(50, Math.max(1, parseInt(e.target.value) || 1));
+                        setNoteCount(value);
+                        localStorage.setItem('noteCount', value);
+                      }}
+                      className="note-count-input"
+                    />
+                    <span className="note-count-description">
+                      生成 {noteCount} 份完整的图片（无封面图模式）
+                    </span>
+                  </div>
+                  <div className="mode-description">
+                    无封面图模式：内页将从"内页1"开始命名，可生成多份相同的图片内容
+                  </div>
+                </div>
+              )}
             </div>
             
             <div className="upload-column">
@@ -864,13 +931,13 @@ function App() {
                   <label>文字颜色:</label>
                   <input
                     type="color"
-                    value={contentStyle.color}
+                    value={contentStyle.textColor}
                     onChange={(e) => handleContentStyleChange({
                       ...contentStyle,
-                      color: e.target.value
+                      textColor: e.target.value
                     })}
                   />
-                  <span className="color-display">{contentStyle.color}</span>
+                  <span className="color-display">{contentStyle.textColor}</span>
                 </div>
                 <div className="input-group">
                   <label>字体:</label>
@@ -909,34 +976,6 @@ function App() {
               </div>
             </div>
 
-            {/* 生成笔记份数设置（仅在无封面图时显示） */}
-            {(!files.covers || files.covers.length === 0) && (
-              <div className="note-count-config">
-                <h3>生成笔记份数</h3>
-                <div className="input-group">
-                  <label>笔记份数：</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={noteCount}
-                    onChange={(e) => {
-                      const value = Math.min(50, Math.max(1, parseInt(e.target.value) || 1));
-                      setNoteCount(value);
-                      localStorage.setItem('noteCount', value);
-                    }}
-                    className="note-count-input"
-                  />
-                  <span className="note-count-description">
-                    生成 {noteCount} 份完整的图片（无封面图模式）
-                  </span>
-                </div>
-                <div className="mode-description">
-                  无封面图模式：内页将从"内页1"开始命名，可生成多份相同的图片内容
-                </div>
-              </div>
-            )}
-
             {/* 更多设置区域 */}
             <div className="advanced-settings">
               <div className="advanced-toggle" onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}>
@@ -949,113 +988,113 @@ function App() {
                   {/* 输出设置 */}
                   <div className="output-config">
                     <h4>输出设置</h4>
-                    <div className="format-section">
+                <div className="format-section">
                       <h5>图片格式</h5>
-                      <label>
-                        <input
-                          type="radio"
-                          name="imageFormat"
-                          value="jpeg"
-                          checked={imageFormat === 'jpeg'}
-                          onChange={() => setImageFormat('jpeg')}
-                        />
-                        JPG格式
-                      </label>
-                      <label>
-                        <input
-                          type="radio"
-                          name="imageFormat"
-                          value="png"
-                          checked={imageFormat === 'png'}
-                          onChange={() => setImageFormat('png')}
-                        />
-                        PNG格式
-                      </label>
-                    </div>
+                  <label>
+                    <input
+                      type="radio"
+                      name="imageFormat"
+                      value="jpeg"
+                      checked={imageFormat === 'jpeg'}
+                      onChange={() => setImageFormat('jpeg')}
+                    />
+                    JPG格式
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="imageFormat"
+                      value="png"
+                      checked={imageFormat === 'png'}
+                      onChange={() => setImageFormat('png')}
+                    />
+                    PNG格式
+                  </label>
+                </div>
 
-                    <div className="format-section">
+                <div className="format-section">
                       <h5>内页模式</h5>
-                      <label>
-                        <input
-                          type="radio"
-                          name="pageMode"
-                          value="flexible"
-                          checked={pageMode === 'flexible'}
-                          onChange={() => setPageMode('flexible')}
-                        />
-                        宽松模式
-                      </label>
-                      <label>
-                        <input
-                          type="radio"
-                          name="pageMode"
-                          value="strict"
-                          checked={pageMode === 'strict'}
-                          onChange={() => setPageMode('strict')}
-                        />
-                        严谨模式
-                      </label>
-                      <label>
-                        <input
-                          type="radio"
-                          name="pageMode"
-                          value="cautious"
-                          checked={pageMode === 'cautious'}
-                          onChange={() => setPageMode('cautious')}
-                        />
-                        谨慎模式
-                      </label>
-                      <div className="mode-description">
-                        {pageMode === 'flexible' && '宽松模式：背景图可重复使用，不受素材数量限制'}
-                        {pageMode === 'strict' && '严谨模式：每个背景图只使用一次，需要足够的素材'}
-                        {pageMode === 'cautious' && '谨慎模式：基于严谨模式，但只有第一页显示标题'}
-                      </div>
-                    </div>
-
-                    <div className="format-section">
-                      <h5>主题模式</h5>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={topicMode}
-                          onChange={(e) => {
-                            setTopicMode(e.target.checked);
-                            localStorage.setItem('topicMode', e.target.checked);
-                          }}
-                        />
-                        启用主题模式
-                      </label>
-                      <div className="mode-description">
-                        主题模式：将Excel中的每个工作表作为一个主题，实现主题分组展示
-                        {topicMode && <div style={{marginTop: '5px', color: '#faad14'}}>
-                          <strong>注意：</strong> 开启此选项时，请确保Excel文件包含多个工作表，每个工作表对应一个主题。
-                        </div>}
-                      </div>
-                    </div>
-
-                    <div className="page-limit-section">
-                      <h5>内页数量限制</h5>
-                      <div className="input-group">
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={pageLimit}
-                          onChange={(e) => {
-                            // 确保输入值在 0-100 之间
-                            const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
-                            setPageLimit(value);
-                          }}
-                          className="page-limit-input"
-                        />
-                        <span className="page-limit-description">
-                          {pageLimit === 0 
-                            ? '默认值0：不限制内页数量' 
-                            : `限制为 ${pageLimit} 页，超出时会保留首尾页`}
-                        </span>
-                      </div>
-                    </div>
+                  <label>
+                    <input
+                      type="radio"
+                      name="pageMode"
+                      value="flexible"
+                      checked={pageMode === 'flexible'}
+                      onChange={() => setPageMode('flexible')}
+                    />
+                    宽松模式
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="pageMode"
+                      value="strict"
+                      checked={pageMode === 'strict'}
+                      onChange={() => setPageMode('strict')}
+                    />
+                    严谨模式
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="pageMode"
+                      value="cautious"
+                      checked={pageMode === 'cautious'}
+                      onChange={() => setPageMode('cautious')}
+                    />
+                    谨慎模式
+                  </label>
+                  <div className="mode-description">
+                    {pageMode === 'flexible' && '宽松模式：背景图可重复使用，不受素材数量限制'}
+                    {pageMode === 'strict' && '严谨模式：每个背景图只使用一次，需要足够的素材'}
+                    {pageMode === 'cautious' && '谨慎模式：基于严谨模式，但只有第一页显示标题'}
                   </div>
+                </div>
+
+                <div className="format-section">
+                      <h5>主题模式</h5>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={topicMode}
+                      onChange={(e) => {
+                        setTopicMode(e.target.checked);
+                        localStorage.setItem('topicMode', e.target.checked);
+                      }}
+                    />
+                    启用主题模式
+                  </label>
+                  <div className="mode-description">
+                    主题模式：将Excel中的每个工作表作为一个主题，实现主题分组展示
+                    {topicMode && <div style={{marginTop: '5px', color: '#faad14'}}>
+                      <strong>注意：</strong> 开启此选项时，请确保Excel文件包含多个工作表，每个工作表对应一个主题。
+                    </div>}
+                  </div>
+                </div>
+
+                <div className="page-limit-section">
+                      <h5>内页数量限制</h5>
+                  <div className="input-group">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={pageLimit}
+                      onChange={(e) => {
+                        // 确保输入值在 0-100 之间
+                        const value = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                        setPageLimit(value);
+                      }}
+                      className="page-limit-input"
+                    />
+                    <span className="page-limit-description">
+                      {pageLimit === 0 
+                        ? '默认值0：不限制内页数量' 
+                        : `限制为 ${pageLimit} 页，超出时会保留首尾页`}
+                    </span>
+                </div>
+              </div>
+            </div>
 
                   {/* 知识拼接模式 */}
                   <div className="knowledge-config">
@@ -1134,9 +1173,7 @@ function App() {
                       </span>
                     </div>
                   </div>
-
-
-
+                  
                   {/* 内页素材切割模式 */}
                   <div className="slice-config">
                     <h4>内页素材切割</h4>
@@ -1215,6 +1252,24 @@ function App() {
           </div>
         </div>
       </main>
+
+      {/* Toast提示 */}
+      {toast.show && (
+        <div className={`toast toast-${toast.type}`}>
+          <div className="toast-content">
+            <span className="toast-icon">
+              {toast.type === 'success' ? '✓' : toast.type === 'warning' ? '⚠' : 'ℹ'}
+            </span>
+            <span className="toast-message">{toast.message}</span>
+            <button 
+              className="toast-close" 
+              onClick={() => setToast({ show: false, message: '', type: 'info' })}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

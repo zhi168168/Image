@@ -20,6 +20,9 @@ export class ImageProcessor {
     const isUsingBlackCover = coverImages?.[0]?.name === 'black_cover.png';
     console.log("是否使用默认黑色封面:", isUsingBlackCover);
 
+    // 创建切割图片管理器
+    const sliceManager = new SliceManager(sliceMode, sliceCount);
+
     try {
       // 解析Excel文件
       onProgress(0, '正在解析表格文件...');
@@ -51,29 +54,15 @@ export class ImageProcessor {
         }
       }
       
-      // 处理素材切割（如果启用）
-      let processedBackgrounds = [];
-      if (sliceMode) {
-        onProgress(10, '正在切割内页素材...');
-        // 对每张背景图进行切割
-        for (const backgroundImage of backgroundImages) {
-          console.log(`切割背景图: ${backgroundImage.name}`);
-          const slices = await this.sliceBackgroundImage(backgroundImage, sliceCount);
-          processedBackgrounds = [...processedBackgrounds, ...slices];
-        }
-        console.log(`内页素材切割完成，共生成 ${processedBackgrounds.length} 个素材片段`);
-        onProgress(15, `内页素材切割完成，共生成${processedBackgrounds.length}个素材片段`);
-      } else {
-        // 不切割时，直接使用原始背景图
-        processedBackgrounds = backgroundImages;
-        console.log("不启用切割模式，使用原始背景图", processedBackgrounds.length, "张");
-      }
+      // 移除预先切割逻辑，改为按需切割
+      console.log("背景图准备完成，将按需处理", backgroundImages.length, "张原始背景图");
+      onProgress(10, `背景图准备完成，共${backgroundImages.length}张原始背景图`);
 
       // 组织封面图
       console.log("开始组织封面图...");
       const organizedCovers = await this.organizeCovers(coverImages, coverMode);
       console.log(`封面图组织完成，共识别到 ${organizedCovers.length} 个封面图组`);
-      onProgress(17, `封面图组织完成，识别到${organizedCovers.length}个封面图组`);
+      onProgress(15, `封面图组织完成，识别到${organizedCovers.length}个封面图组`);
       
       // 创建 ZIP 文件
       const zip = new JSZip();
@@ -111,16 +100,14 @@ export class ImageProcessor {
         let backgroundCanvas;
         
         if (pageMode === 'flexible') {
-          // 宽松模式：使用对应的背景图
-          // 如果背景图不够，则循环使用
-          const backgroundIndex = i % processedBackgrounds.length;
-          
+          // 宽松模式：每篇笔记使用同一张背景图的同一个切片
           if (sliceMode) {
-            // 切割模式下，processedBackgrounds已经是Canvas对象数组
-            backgroundCanvas = processedBackgrounds[backgroundIndex];
+            // 切割模式：所有笔记都使用第一张图片的第一个切片
+            backgroundCanvas = await sliceManager.getSlicedBackground(backgroundImages[0], 0);
           } else {
-            // 非切割模式，需要处理背景图
-            backgroundCanvas = await this.processBackgroundImage(processedBackgrounds[backgroundIndex]);
+            // 非切割模式：循环使用背景图
+            const backgroundIndex = i % backgroundImages.length;
+            backgroundCanvas = await this.processBackgroundImage(backgroundImages[backgroundIndex]);
           }
         }
         
@@ -141,9 +128,10 @@ export class ImageProcessor {
           // 谨慎模式：每个内页使用不同的背景，只有第一页显示标题
           try {
             if (sliceMode) {
-              // 切割模式下，直接使用处理好的背景Canvas
-              contentPages = await this.generateContentPagesCautiousWithProcessedBackgrounds(
-                processedBackgrounds,
+              // 按需切割模式
+              contentPages = await this.generateContentPagesCautiousWithSliceManager(
+                backgroundImages,
+                sliceManager,
                 backgroundIndex,
                 textContent,
                 titleConfig,
@@ -155,7 +143,7 @@ export class ImageProcessor {
               // 非切割模式，使用原始背景图
               console.log(`谨慎模式: 使用从索引 ${backgroundIndex} 开始的背景图`);
               contentPages = await this.generateContentPagesCautious(
-                processedBackgrounds,
+                backgroundImages,
                 backgroundIndex,
                 textContent,
                 titleConfig,
@@ -177,9 +165,10 @@ export class ImageProcessor {
           // 严谨模式：每个内页使用不同的背景
           try {
             if (sliceMode) {
-              // 切割模式下，直接使用处理好的背景Canvas
-              contentPages = await this.generateContentPagesStrictWithProcessedBackgrounds(
-                processedBackgrounds,
+              // 按需切割模式
+              contentPages = await this.generateContentPagesStrictWithSliceManager(
+                backgroundImages,
+                sliceManager,
                 backgroundIndex,
                 textContent,
                 titleConfig,
@@ -191,7 +180,7 @@ export class ImageProcessor {
               // 非切割模式，使用原始背景图
               console.log(`严谨模式: 使用从索引 ${backgroundIndex} 开始的背景图`);
               contentPages = await this.generateContentPagesStrict(
-                processedBackgrounds,
+                backgroundImages,
                 backgroundIndex,
                 textContent,
                 titleConfig,
@@ -446,6 +435,40 @@ export class ImageProcessor {
       console.error('Error processing images:', error);
       onProgress(0, `处理出错: ${error.message}`);
       return { success: false, error: error.message };
+    } finally {
+      // 清理切割图片缓存
+      if (sliceManager) {
+        // 在cleanup之前获取被切割过的原始图片列表
+        const slicedImageNames = sliceManager.getSlicedOriginalImageNames();
+        
+        // 执行清理
+        sliceManager.cleanup();
+        
+        // 显示被切割过的原始图片列表（已注释，减少日志输出）
+        if (slicedImageNames.length > 0) {
+          // console.log("\n=== 🗑️ 被切割过的原始图片 ===");
+          // console.log("以下背景图片已被切割使用，您可以考虑手动删除这些原始文件以节省空间：");
+          // slicedImageNames.forEach((fileName, index) => {
+          //   console.log(`${index + 1}. ${fileName}`);
+          // });
+          // console.log("=== 列表结束 ===\n");
+          
+          // 通过自定义事件发送toast消息
+          if (typeof window !== 'undefined' && slicedImageNames.length > 0) {
+            const fileList = slicedImageNames.map((name, index) => `${index + 1}. ${name}`).join('\n');
+            setTimeout(() => {
+              // 发送自定义事件来显示toast
+              const event = new CustomEvent('showToast', {
+                detail: {
+                  message: `处理完成！\n\n以下 ${slicedImageNames.length} 张背景图片已被切割使用，您可以考虑手动删除这些原始文件以节省空间：\n\n${fileList}`,
+                  type: 'success'
+                }
+              });
+              window.dispatchEvent(event);
+            }, 1000); // 延迟1秒显示，确保处理完成
+          }
+        }
+      }
     }
   }
 
@@ -498,10 +521,14 @@ export class ImageProcessor {
             const sheet = workbook.Sheets[sheetName];
             const items = [];
             
-            // 读取当前sheet的A列所有内容（子项目）
-            let i = 1;
+            // 读取当前sheet的A列所有内容（子项目），从第2行开始跳过表头
+            let i = 2;
             while (sheet[`A${i}`]) {
-              items.push(sheet[`A${i}`].v);
+              const cellValue = sheet[`A${i}`].v;
+              // 只添加非空的内容
+              if (cellValue && cellValue.toString().trim()) {
+                items.push(cellValue.toString().trim());
+              }
               i++;
             }
             
@@ -519,9 +546,13 @@ export class ImageProcessor {
             console.warn('未找到符合多主题结构的数据，尝试使用兼容模式');
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
             const items = [];
-            let i = 1;
+            let i = 2; // 从第2行开始跳过表头
             while (firstSheet[`A${i}`]) {
-              items.push(firstSheet[`A${i}`].v);
+              const cellValue = firstSheet[`A${i}`].v;
+              // 只添加非空的内容
+              if (cellValue && cellValue.toString().trim()) {
+                items.push(cellValue.toString().trim());
+              }
               i++;
             }
             
@@ -792,8 +823,8 @@ export class ImageProcessor {
         currentPage.ctx.fillStyle = contentStyle?.color || '#FFFFFF';
         currentPage.ctx.textAlign = 'left';
         
-                  // 计算绘制主题需要的空间
-          const topicText = topic.topic;
+        // 计算绘制主题需要的空间
+        const topicText = topic.topic;
           const topicLines = this.wrapText(currentPage.ctx, topicText, topicFontSize, 1082);
         
         // 检查页面剩余空间
@@ -1857,7 +1888,11 @@ export class ImageProcessor {
   static async sliceBackgroundImage(backgroundImage, sliceCount) {
     return new Promise((resolve) => {
       const img = new Image();
+      
       img.onload = () => {
+        // 释放对象URL
+        URL.revokeObjectURL(img.src);
+        
         // 确定网格布局（行和列）
         let rows, cols;
         
@@ -1992,6 +2027,13 @@ export class ImageProcessor {
         
         resolve(slices);
       };
+      
+      img.onerror = () => {
+        console.error('切割背景图加载失败');
+        URL.revokeObjectURL(img.src);
+        resolve([]);
+      };
+      
       img.src = URL.createObjectURL(backgroundImage);
     });
   }
@@ -2951,3 +2993,605 @@ export class ImageProcessor {
     ctx.restore();
   }
 } 
+
+// 切割图片管理器 - 实现按需切割和自动清理
+class SliceManager {
+  constructor(sliceMode, sliceCount) {
+    this.sliceMode = sliceMode;
+    this.sliceCount = sliceCount;
+    this.sliceCache = new Map(); // 缓存切割后的图片
+    this.createdSlices = new Set(); // 记录创建的切割图片，用于后续清理
+    this.slicedOriginalImages = new Set(); // 记录被切割过的原始图片，用于删除
+  }
+
+  // 获取切割后的背景图（按需切割）
+  async getSlicedBackground(backgroundImage, sliceIndex) {
+    if (!this.sliceMode) {
+      return await ImageProcessor.processBackgroundImage(backgroundImage);
+    }
+
+    const cacheKey = `${backgroundImage.name}_${sliceIndex}`;
+    
+    // 如果已经切割过这个具体切片，直接返回缓存
+    if (this.sliceCache.has(cacheKey)) {
+      console.log(`使用缓存的切割图片: ${cacheKey}`);
+      return this.sliceCache.get(cacheKey);
+    }
+
+    // 检查是否已经切割过这张图片的任何切片
+    const hasAnySlice = Array.from(this.sliceCache.keys()).some(key => key.startsWith(`${backgroundImage.name}_`));
+    
+    if (!hasAnySlice) {
+      // 第一次接触这张图片，切割整张图片并记录
+      console.log(`首次切割背景图: ${backgroundImage.name}`);
+      const slices = await ImageProcessor.sliceBackgroundImage(backgroundImage, this.sliceCount);
+      
+      // 记录这张原始图片被切割了（按您的需求，只要切割就记录）
+      this.slicedOriginalImages.add(backgroundImage);
+      console.log(`记录被切割的原始图片: ${backgroundImage.name}`);
+      
+      // 缓存所有切片
+      for (let i = 0; i < slices.length; i++) {
+        const sliceKey = `${backgroundImage.name}_${i}`;
+        this.sliceCache.set(sliceKey, slices[i]);
+        this.createdSlices.add(sliceKey);
+      }
+      
+      console.log(`切割完成，生成 ${slices.length} 个切片`);
+    }
+
+    return this.sliceCache.get(cacheKey);
+  }
+
+  // 获取指定的切片，如果不存在则切割
+  async getSlice(backgroundImage, sliceIndex) {
+    if (!this.sliceMode) {
+      return await ImageProcessor.processBackgroundImage(backgroundImage);
+    }
+
+    return await this.getSlicedBackground(backgroundImage, sliceIndex);
+  }
+
+  // 清理所有切割后的图片，并删除被切割过的原始图片
+  cleanup() {
+    // console.log(`开始清理切割图片缓存，共 ${this.createdSlices.size} 个切片`);
+    
+    // 清理Canvas对象
+    for (const sliceKey of this.createdSlices) {
+      const canvas = this.sliceCache.get(sliceKey);
+      if (canvas && canvas.getContext) {
+        // 清理Canvas内容
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+    
+    // 清理缓存
+    this.sliceCache.clear();
+    this.createdSlices.clear();
+    
+    // console.log("切割图片缓存清理完成");
+    
+    // 删除被切割过的原始图片
+    if (this.slicedOriginalImages.size > 0) {
+      // console.log(`开始删除被切割过的原始图片，共 ${this.slicedOriginalImages.size} 张`);
+      this.deleteSlicedOriginalImages();
+    }
+  }
+  
+  // 获取被切割过的原始图片列表（在cleanup之前调用）
+  getSlicedOriginalImageNames() {
+    return Array.from(this.slicedOriginalImages).map(img => img.name);
+  }
+  
+  // 删除被切割过的原始图片文件
+  deleteSlicedOriginalImages() {
+    try {
+      const deletedFileNames = [];
+      
+      for (const originalImage of this.slicedOriginalImages) {
+        // console.log(`准备删除被切割的原始图片: ${originalImage.name}`);
+        deletedFileNames.push(originalImage.name);
+        
+        // 由于浏览器环境的限制，我们无法直接删除用户电脑上的文件
+        // 但我们可以通过以下方式来"标记删除"或清理引用：
+        
+        // 1. 清理文件对象的引用（释放内存）
+        if (originalImage.arrayBuffer) {
+          originalImage.arrayBuffer = null;
+        }
+        
+        // 2. 如果有 URL.createObjectURL 创建的临时 URL，释放它
+        if (originalImage._tempURL) {
+          URL.revokeObjectURL(originalImage._tempURL);
+          originalImage._tempURL = null;
+        }
+        
+        // 3. 标记文件已被"删除"
+        originalImage._deleted = true;
+        
+        // console.log(`已标记删除原始图片: ${originalImage.name}`);
+      }
+      
+      // 显示被切割过的文件列表，提示用户可以手动删除（已注释，减少日志输出）
+      if (deletedFileNames.length > 0) {
+        // console.log("=== 被切割过的原始图片列表 ===");
+        // console.log("以下图片已被切割使用，您可以考虑手动删除这些原始文件：");
+        // deletedFileNames.forEach((fileName, index) => {
+        //   console.log(`${index + 1}. ${fileName}`);
+        // });
+        // console.log("=== 列表结束 ===");
+        
+        // 可以通过回调函数通知UI显示这个列表
+        if (this.onSlicedImagesReady) {
+          this.onSlicedImagesReady(deletedFileNames);
+        }
+      }
+      
+      // 清理记录
+      this.slicedOriginalImages.clear();
+      // console.log("原始图片删除标记完成");
+      
+    } catch (error) {
+      console.error("删除原始图片时出错:", error);
+    }
+  }
+  
+  // 设置回调函数，用于通知UI显示被切割的文件列表
+  setSlicedImagesCallback(callback) {
+    this.onSlicedImagesReady = callback;
+  }
+  
+
+}
+
+// 扩展ImageProcessor类，添加按需切割的函数
+ImageProcessor.generateContentPagesStrictWithSliceManager = async function(backgroundImages, sliceManager, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false, contentStyle = null) {
+  // 检查是否是结构化的主题数据
+  const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
+                           typeof textContent[0] === 'object' && textContent[0].topic && 
+                           Array.isArray(textContent[0].items);
+  
+  // 计算内容行间距
+  const contentLineHeight = Math.round((contentStyle?.fontSize || 45) * (contentStyle?.lineHeight || 1.6));
+  
+  // 处理内容数据
+  let shuffledContent;
+  if (isStructuredData && !topicMode) {
+    // 结构化数据，但未启用主题模式，将其扁平化处理但不包括Sheet名称
+    console.log("严谨模式(按需切割): 未启用主题模式，将结构化数据扁平化处理，跳过Sheet名称");
+    const flatContent = [];
+    textContent.forEach(topic => {
+      topic.items.forEach(item => {
+        flatContent.push(item);
+      });
+    });
+    console.log(`严谨模式(按需切割): 扁平化后共有 ${flatContent.length} 个项目`);
+    shuffledContent = this.shuffleArray([...flatContent]);
+  } else {
+    // 普通数组数据或主题模式，直接打乱
+    shuffledContent = this.shuffleArray([...textContent]);
+  }
+  const pages = [];
+  let currentPage = null;
+  let globalLineNumber = 1; // 全局序号，跨页面连续
+  let currentTextIndex = 0;
+  let currentBackgroundIndex = 0; // 背景图数组索引，从0开始
+  let isFirstPage = true;
+
+  // 创建新页面
+  const createNewPage = async () => {
+    console.log(`🔥 严谨模式页面创建调试 #${pages.length + 1}:
+    📊 当前状态:
+    - 当前背景图索引: ${currentBackgroundIndex}
+    - 背景图总数: ${backgroundImages.length}
+    - 切割模式: ${sliceManager.sliceMode}
+    - 每张图切片数: ${sliceManager.sliceCount}
+    - 当前文本索引: ${currentTextIndex}
+    - 待处理文本总数: ${shuffledContent.length}
+    - 已创建页面数: ${pages.length}
+    - 是否首页: ${isFirstPage}`);
+    
+    // 检查背景图是否足够（严谨模式不允许重复使用）
+    if (sliceManager.sliceMode) {
+      // 切割模式：检查是否有足够的切片
+      const totalAvailableSlices = backgroundImages.length * sliceManager.sliceCount;
+      console.log(`🔍 【严谨模式】切割模式检查:
+      - 总可用切片数: ${totalAvailableSlices}
+      - 当前需要的切片索引: ${currentBackgroundIndex}
+      - 检查结果: ${currentBackgroundIndex >= totalAvailableSlices ? '❌ 不足' : '✅ 足够'}`);
+      
+      if (currentBackgroundIndex >= totalAvailableSlices) {
+        console.error(`❌ 【严谨模式】内页素材不够！需要切片索引 ${currentBackgroundIndex}，但总切片数只有 ${totalAvailableSlices} 个（${backgroundImages.length} 张背景图 × ${sliceManager.sliceCount} 个切片）`);
+        console.error(`💡 调试信息: 页面 #${pages.length + 1} 创建失败`);
+        throw new Error(`内页素材不够！需要至少 ${currentBackgroundIndex + 1} 个切片，但只有 ${totalAvailableSlices} 个（${backgroundImages.length} 张背景图 × ${sliceManager.sliceCount} 个切片）`);
+      }
+    } else {
+      // 非切割模式：检查是否有足够的背景图
+      console.log(`🔍 【严谨模式】非切割模式检查: 背景图总数=${backgroundImages.length}, 需要背景图索引=${currentBackgroundIndex}`);
+      if (currentBackgroundIndex >= backgroundImages.length) {
+        console.error(`❌ 【严谨模式】内页素材不够！需要至少 ${currentBackgroundIndex + 1} 张背景图，但只有 ${backgroundImages.length} 张`);
+        throw new Error(`内页素材不够！需要至少 ${currentBackgroundIndex + 1} 张背景图，但只有 ${backgroundImages.length} 张`);
+      }
+    }
+    
+    // 计算实际需要的背景图索引和切片索引
+    const actualBackgroundIndex = Math.floor(currentBackgroundIndex / sliceManager.sliceCount);
+    const sliceIndex = currentBackgroundIndex % sliceManager.sliceCount;
+    
+    console.log(`✅ 【严谨模式】使用背景图 ${actualBackgroundIndex}，切片 ${sliceIndex} (总索引: ${currentBackgroundIndex})`);
+    
+    // 按需获取切割后的背景图
+    const backgroundCanvas = await sliceManager.getSlice(backgroundImages[actualBackgroundIndex], sliceIndex);
+    console.log(`🔄 【严谨模式】索引递增: ${currentBackgroundIndex} → ${currentBackgroundIndex + 1}`);
+    currentBackgroundIndex++;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 1242;
+    canvas.height = 1660;
+    const ctx = canvas.getContext('2d');
+
+    // 复制背景
+    ctx.drawImage(backgroundCanvas, 0, 0);
+
+    let contentStartY = 200;
+
+    // 只在第一页显示标题
+    if (isFirstPage) {
+      // 设置标题字体
+      const titleFontSize = titleConfig.fontSize || 50;
+      const titleY = 140;
+
+      // 绘制标题文字（使用特效）
+      this.drawTextWithEffect(
+        ctx,
+        titleConfig.text,
+        canvas.width / 2,
+        titleY,
+        titleFontSize,
+        titleConfig.textEffect || 'none',
+        titleConfig.effectColor || '#FFFFFF',
+        titleConfig.effectIntensity || 3,
+        titleConfig.fontFamily || 'sans-serif',
+        titleConfig.textColor || '#FFFFFF',
+        titleConfig.strokeWidth || 2.0
+      );
+
+      // 计算标题实际占用的高度，确保内容不重叠
+      const titleBottomY = titleY + (titleFontSize * 0.7) + (titleConfig.effectIntensity || 3) + 80;
+      contentStartY = Math.max(titleBottomY, 200);
+      
+      isFirstPage = false;
+    }
+
+    return {
+      canvas,
+      ctx,
+      currentY: contentStartY
+    };
+  };
+
+  // 其余逻辑与原函数相同
+  while (currentTextIndex < shuffledContent.length) {
+    if (!currentPage) {
+      currentPage = await createNewPage();
+    }
+
+    const { canvas, ctx, currentY } = currentPage;
+
+    // 设置内容字体
+    const contentFontSize = contentStyle?.fontSize || 45;
+    ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+    ctx.fillStyle = contentStyle?.textColor || '#FFFFFF';
+    ctx.textAlign = 'left';
+
+    const textData = shuffledContent[currentTextIndex];
+    let textToProcess;
+
+    if (topicMode && typeof textData === 'object') {
+      // 主题模式：不显示Sheet名称，只处理内容项目
+      textToProcess = textData.items.join('\n');
+    } else {
+      textToProcess = typeof textData === 'string' ? textData : String(textData);
+    }
+
+    const lines = textToProcess.split('\n');
+
+    // 绘制文本 - 逐行处理但保持全局序号
+    let isFirstLineOfExcelItem = true;
+    
+    for (const line of lines) {
+      if (line.trim() === '') {
+        // 检查空行是否能放下
+        if (currentPage.currentY + contentLineHeight * 0.5 > canvas.height - 50) {
+          // 保存当前页面并创建新页面
+          console.log(`📄 【严谨模式】保存页面 #${pages.length + 1}: 空行放不下`);
+          const blob = await this.canvasToBlob(currentPage.canvas, imageFormat);
+          pages.push(blob);
+          console.log(`✅ 【严谨模式】页面 #${pages.length} 已保存，总页数: ${pages.length}`);
+          currentPage = await createNewPage();
+          
+          // 重新设置字体样式
+          currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.textColor || '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+        }
+        currentPage.currentY += contentLineHeight * 0.5;
+        continue;
+      }
+
+      const wrappedLines = this.wrapText(ctx, line, contentFontSize, canvas.width - 160);
+      for (const wrappedLine of wrappedLines) {
+        // 检查当前行是否能放下
+        if (currentPage.currentY + contentLineHeight > canvas.height - 50) {
+          // 保存当前页面并创建新页面
+          console.log(`📄 【严谨模式】保存页面 #${pages.length + 1}: 当前行放不下`);
+          const blob = await this.canvasToBlob(currentPage.canvas, imageFormat);
+          pages.push(blob);
+          console.log(`✅ 【严谨模式】页面 #${pages.length} 已保存，总页数: ${pages.length}`);
+          currentPage = await createNewPage();
+          
+          // 重新设置字体样式
+          currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.textColor || '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+        }
+
+        if (isFirstLineOfExcelItem) {
+          // 只在Excel行的第一行显示序号
+          console.log(`🔢 【严谨模式】绘制序号 ${globalLineNumber}: ${wrappedLine.substring(0, 20)}...`);
+          currentPage.ctx.fillText(`${globalLineNumber}. ${wrappedLine}`, 80, currentPage.currentY);
+          isFirstLineOfExcelItem = false;
+          globalLineNumber++; // 每绘制一个序号就增加
+        } else {
+          // 后续行不显示序号，保持缩进对齐
+          currentPage.ctx.fillText(`    ${wrappedLine}`, 80, currentPage.currentY);
+        }
+        currentPage.currentY += contentLineHeight;
+      }
+      
+      // 每处理完一行原始内容，重置标记（为下一个Excel行做准备）
+      isFirstLineOfExcelItem = true;
+    }
+
+    currentPage.currentY += contentLineHeight * 0.5; // 项目间距
+    currentTextIndex++;
+  }
+
+  // 保存最后一页
+  if (currentPage) {
+    console.log(`📄 【严谨模式】保存最后一页 #${pages.length + 1}`);
+    const blob = await this.canvasToBlob(currentPage.canvas, imageFormat);
+    pages.push(blob);
+    console.log(`🎯 【严谨模式】最终完成，总页数: ${pages.length}`);
+  }
+
+  return pages;
+};
+
+ImageProcessor.generateContentPagesCautiousWithSliceManager = async function(backgroundImages, sliceManager, startIndex, textContent, titleConfig, imageFormat = 'png', topicMode = false, contentStyle = null) {
+  // 检查是否是结构化的主题数据
+  const isStructuredData = Array.isArray(textContent) && textContent.length > 0 && 
+                           typeof textContent[0] === 'object' && textContent[0].topic && 
+                           Array.isArray(textContent[0].items);
+  
+  // 计算内容行间距
+  const contentLineHeight = Math.round((contentStyle?.fontSize || 45) * (contentStyle?.lineHeight || 1.6));
+  
+  // 处理内容数据
+  let shuffledContent;
+  if (isStructuredData && !topicMode) {
+    // 结构化数据，但未启用主题模式，将其扁平化处理但不包括Sheet名称
+    console.log("谨慎模式(按需切割): 未启用主题模式，将结构化数据扁平化处理，跳过Sheet名称");
+    const flatContent = [];
+    textContent.forEach(topic => {
+      topic.items.forEach(item => {
+        flatContent.push(item);
+      });
+    });
+    console.log(`谨慎模式(按需切割): 扁平化后共有 ${flatContent.length} 个项目`);
+    shuffledContent = this.shuffleArray([...flatContent]);
+  } else {
+    // 普通数组数据或主题模式，直接打乱
+    shuffledContent = this.shuffleArray([...textContent]);
+  }
+  const pages = [];
+  let currentPage = null;
+  let globalLineNumber = 1; // 全局序号，跨页面连续
+  let currentTextIndex = 0;
+  let currentBackgroundIndex = 0; // 背景图数组索引，从0开始
+  let isFirstPage = true;
+
+  // 计算文字高度的辅助函数
+  const calculateTextHeight = (ctx, text, fontSize, maxWidth) => {
+    const lines = text.split('\n');
+    let totalHeight = 0;
+    
+    for (const line of lines) {
+      if (line.trim() === '') {
+        totalHeight += contentLineHeight * 0.5;
+        continue;
+      }
+      
+      const wrappedLines = this.wrapText(ctx, line, fontSize, maxWidth);
+      totalHeight += wrappedLines.length * contentLineHeight;
+    }
+    
+    return totalHeight;
+  };
+
+  // 创建新页面
+  const createNewPage = async () => {
+    console.log(`📊 谨慎模式(按需切割)创建新页面状态:
+    - 当前背景图索引: ${currentBackgroundIndex}
+    - 背景图总数: ${backgroundImages.length}
+    - 切割模式: ${sliceManager.sliceMode}
+    - 每张图切片数: ${sliceManager.sliceCount}
+    - 当前文本索引: ${currentTextIndex}
+    - 待处理文本总数: ${shuffledContent.length}
+    - 是否首页: ${isFirstPage}`);
+    
+    // 检查背景图是否足够（谨慎模式不允许重复使用）
+    if (sliceManager.sliceMode) {
+      // 切割模式：检查是否有足够的切片
+      const totalAvailableSlices = backgroundImages.length * sliceManager.sliceCount;
+      console.log(`🔍 切割模式检查: 总可用切片=${totalAvailableSlices}, 需要切片索引=${currentBackgroundIndex}`);
+      if (currentBackgroundIndex >= totalAvailableSlices) {
+        console.error(`❌ 内页素材不够！需要至少 ${currentBackgroundIndex + 1} 个切片，但只有 ${totalAvailableSlices} 个（${backgroundImages.length} 张背景图 × ${sliceManager.sliceCount} 个切片）`);
+        throw new Error(`内页素材不够！需要至少 ${currentBackgroundIndex + 1} 个切片，但只有 ${totalAvailableSlices} 个（${backgroundImages.length} 张背景图 × ${sliceManager.sliceCount} 个切片）`);
+      }
+    } else {
+      // 非切割模式：检查是否有足够的背景图
+      console.log(`🔍 非切割模式检查: 背景图总数=${backgroundImages.length}, 需要背景图索引=${currentBackgroundIndex}`);
+      if (currentBackgroundIndex >= backgroundImages.length) {
+        console.error(`❌ 内页素材不够！需要至少 ${currentBackgroundIndex + 1} 张背景图，但只有 ${backgroundImages.length} 张`);
+        throw new Error(`内页素材不够！需要至少 ${currentBackgroundIndex + 1} 张背景图，但只有 ${backgroundImages.length} 张`);
+      }
+    }
+    
+    // 计算实际需要的背景图索引和切片索引
+    const actualBackgroundIndex = Math.floor(currentBackgroundIndex / sliceManager.sliceCount);
+    const sliceIndex = currentBackgroundIndex % sliceManager.sliceCount;
+    
+    console.log(`✅ 谨慎模式(按需切割): 使用背景图 ${actualBackgroundIndex}，切片 ${sliceIndex} (总索引: ${currentBackgroundIndex})`);
+    
+    // 按需获取切割后的背景图
+    const backgroundCanvas = await sliceManager.getSlice(backgroundImages[actualBackgroundIndex], sliceIndex);
+    currentBackgroundIndex++;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 1242;
+    canvas.height = 1660;
+    const ctx = canvas.getContext('2d');
+
+    // 复制背景
+    ctx.drawImage(backgroundCanvas, 0, 0);
+
+    let contentStartY = 200;
+
+    // 只在第一页显示标题
+    if (isFirstPage) {
+      const titleFontSize = titleConfig.fontSize || 50;
+      const titleY = 140;
+
+      // 绘制标题文字（使用特效）
+      this.drawTextWithEffect(
+        ctx,
+        titleConfig.text,
+        canvas.width / 2,
+        titleY,
+        titleFontSize,
+        titleConfig.textEffect || 'none',
+        titleConfig.effectColor || '#FFFFFF',
+        titleConfig.effectIntensity || 3,
+        titleConfig.fontFamily || 'sans-serif',
+        titleConfig.textColor || '#FFFFFF',
+        titleConfig.strokeWidth || 2.0
+      );
+
+      // 计算标题实际占用的高度，确保内容不重叠
+      const titleBottomY = titleY + (titleFontSize * 0.7) + (titleConfig.effectIntensity || 3) + 80;
+      contentStartY = Math.max(titleBottomY, 200);
+      
+      isFirstPage = false;
+    }
+
+    return {
+      canvas,
+      ctx,
+      currentY: contentStartY
+    };
+  };
+
+  // 其余逻辑与原函数相同
+  while (currentTextIndex < shuffledContent.length) {
+    if (!currentPage) {
+      currentPage = await createNewPage();
+    }
+
+    const { canvas, ctx, currentY } = currentPage;
+
+    // 设置内容字体
+    const contentFontSize = contentStyle?.fontSize || 45;
+    ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+    ctx.fillStyle = contentStyle?.textColor || '#FFFFFF';
+    ctx.textAlign = 'left';
+
+    const textData = shuffledContent[currentTextIndex];
+    let textToProcess;
+
+    if (topicMode && typeof textData === 'object') {
+      // 主题模式：不显示Sheet名称，只处理内容项目
+      textToProcess = textData.items.join('\n');
+    } else {
+      textToProcess = typeof textData === 'string' ? textData : String(textData);
+    }
+
+
+
+    // 绘制文本 - 逐行处理但保持全局序号
+    const lines = textToProcess.split('\n');
+    let isFirstLineOfExcelItem = true;
+    
+    for (const line of lines) {
+      if (line.trim() === '') {
+        // 检查空行是否能放下
+        if (currentPage.currentY + contentLineHeight * 0.5 > canvas.height - 50) {
+          // 保存当前页面并创建新页面
+          const blob = await this.canvasToBlob(currentPage.canvas, imageFormat);
+          pages.push(blob);
+          currentPage = await createNewPage();
+          
+          // 重新设置字体样式
+          currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.textColor || '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+        }
+        currentPage.currentY += contentLineHeight * 0.5;
+        continue;
+      }
+
+      const wrappedLines = this.wrapText(ctx, line, contentFontSize, canvas.width - 160);
+      for (const wrappedLine of wrappedLines) {
+        // 检查当前行是否能放下
+        if (currentPage.currentY + contentLineHeight > canvas.height - 50) {
+          // 保存当前页面并创建新页面
+          const blob = await this.canvasToBlob(currentPage.canvas, imageFormat);
+          pages.push(blob);
+          currentPage = await createNewPage();
+          
+          // 重新设置字体样式
+          currentPage.ctx.font = `${contentFontSize}px ${contentStyle?.fontFamily || 'sans-serif'}`;
+          currentPage.ctx.fillStyle = contentStyle?.textColor || '#FFFFFF';
+          currentPage.ctx.textAlign = 'left';
+        }
+
+        if (isFirstLineOfExcelItem) {
+          // 只在Excel行的第一行显示序号
+          console.log(`🔢 【谨慎模式】绘制序号 ${globalLineNumber}: ${wrappedLine.substring(0, 20)}...`);
+          currentPage.ctx.fillText(`${globalLineNumber}. ${wrappedLine}`, 80, currentPage.currentY);
+          isFirstLineOfExcelItem = false;
+          globalLineNumber++; // 每绘制一个序号就增加
+        } else {
+          // 后续行不显示序号，保持缩进对齐
+          currentPage.ctx.fillText(`    ${wrappedLine}`, 80, currentPage.currentY);
+        }
+        currentPage.currentY += contentLineHeight;
+      }
+      
+      // 每处理完一行原始内容，重置标记（为下一个Excel行做准备）
+      isFirstLineOfExcelItem = true;
+    }
+
+    currentPage.currentY += contentLineHeight * 0.5; // 项目间距
+    currentTextIndex++;
+  }
+
+  // 保存最后一页
+  if (currentPage) {
+    const blob = await this.canvasToBlob(currentPage.canvas, imageFormat);
+    pages.push(blob);
+  }
+
+  return pages;
+};
